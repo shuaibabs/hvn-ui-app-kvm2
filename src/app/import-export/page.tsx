@@ -28,6 +28,12 @@ type FailedRecord = {
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100, 250, 500, 1000, 5000];
 const REQUIRED_HEADERS = ['Mobile', 'NumberType', 'PurchaseFrom', 'PurchasePrice', 'PurchaseDate', 'CurrentLocation', 'LocationType', 'Status', 'OwnershipType'];
+const ALL_EXPECTED_HEADERS = [
+  'Mobile', 'NumberType', 'PurchaseFrom', 'PurchasePrice', 'PurchaseDate', 
+  'CurrentLocation', 'LocationType', 'Status', 'OwnershipType', 'AssignedTo', 
+  'SalePrice', 'Notes', 'UploadStatus', 'PartnerName', 'RTPDate', 
+  'SafeCustodyDate', 'AccountName', 'BillDate', 'PDBill'
+];
 
 
 export default function ImportExportPage() {
@@ -123,6 +129,19 @@ export default function ImportExportPage() {
   };
 
   const processImportedData = async (data: any[], fileName: string) => {
+    // Debug: Log first few records to see what's being parsed
+    console.log('[CSV PARSE DEBUG] Total records:', data.length);
+    data.slice(0, 3).forEach((record, idx) => {
+      console.log(`[CSV PARSE DEBUG] Record ${idx}:`, {
+        Mobile: record.Mobile,
+        Status: record.Status,
+        StatusType: typeof record.Status,
+        RTPDate: record.RTPDate,
+        NumberType: record.NumberType,
+        OwnershipType: record.OwnershipType
+      });
+    });
+    
     const { successCount, updatedCount, failedRecords: newFailedRecords } = await bulkAddNumbers(data as any[]);
     
     setImportResult({ successCount, updatedCount, failedCount: newFailedRecords.length });
@@ -159,6 +178,11 @@ export default function ImportExportPage() {
         transformHeader: header => header.trim(),
         complete: (results) => {
            const headers = results.meta.fields || [];
+           
+           // Debug: Log headers being parsed
+           console.log('[CSV HEADERS DEBUG] Found headers:', headers);
+           console.log('[CSV HEADERS DEBUG] Status column index:', headers.indexOf('Status'));
+           
            const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h));
 
             if (missingHeaders.length > 0) {
@@ -166,10 +190,21 @@ export default function ImportExportPage() {
                 toast({
                     variant: 'destructive',
                     title: 'Missing Required Headers',
-                    description: `Your CSV file is missing the following columns: ${missingHeaders.join(', ')}`,
-                    duration: 8000,
+                    description: `Your CSV file is missing the following required columns: ${missingHeaders.join(', ')}. Please ensure all required headers are present.`,
+                    duration: 10000,
                 });
                 return;
+            }
+
+            // Check for extra/unexpected headers
+            const unexpectedHeaders = headers.filter(h => !ALL_EXPECTED_HEADERS.includes(h));
+            if (unexpectedHeaders.length > 0) {
+                toast({
+                    variant: 'default',
+                    title: 'Extra Headers Detected',
+                    description: `Your CSV contains unexpected columns: ${unexpectedHeaders.join(', ')}. These will be ignored during import.`,
+                    duration: 8000,
+                });
             }
 
           processImportedData(results.data, file.name);
@@ -179,7 +214,7 @@ export default function ImportExportPage() {
           toast({
             variant: 'destructive',
             title: 'CSV Parse Error',
-            description: error.message,
+            description: error.message || 'Failed to parse CSV file. Please ensure it is a valid CSV format.',
           });
         },
       });
@@ -188,7 +223,7 @@ export default function ImportExportPage() {
         toast({
             variant: 'destructive',
             title: 'Unsupported File Type',
-            description: 'Please upload a .csv file.',
+            description: 'Please upload a .csv file. Other formats are not supported.',
         });
     }
 
@@ -266,7 +301,23 @@ export default function ImportExportPage() {
                   {isImporting ? 'Importing...' : 'Import from CSV'}
                 </Button>
                 <input type="file" id="import-file-input" className="hidden" accept=".csv" onChange={handleFileImport} />
-                 <p className="text-xs text-muted-foreground mt-2">Required headers: Mobile, NumberType, PurchaseFrom, PurchasePrice, PurchaseDate, CurrentLocation, LocationType, Status, OwnershipType. Optional: AssignedTo, SalePrice, Notes, UploadStatus, PartnerName (required if OwnershipType is Partnership). Conditional: RTPDate (required if Status is 'Non-RTP'), SafeCustodyDate and AccountName (required if NumberType is 'COCP'), BillDate and PDBill (required for Postpaid).</p>
+                <div className="text-xs text-muted-foreground mt-3 space-y-1">
+                  <p className="font-semibold">Required Headers:</p>
+                  <p>Mobile, NumberType, PurchaseFrom, PurchasePrice, PurchaseDate, CurrentLocation, LocationType, Status, OwnershipType</p>
+                  <p className="font-semibold mt-2">Optional Fields:</p>
+                  <p>AssignedTo (defaults to "Unassigned" if employee not found), SalePrice, Notes, UploadStatus (Pending|Done), PartnerName (required if OwnershipType is "Partnership")</p>
+                  <p className="font-semibold mt-2">Conditional Fields:</p>
+                  <p><strong>For Non-RTP Status:</strong> RTPDate (dd-MM-yy format, required) - <em className="text-amber-600">Number will automatically become RTP when this date is reached</em></p>
+                  <p><strong>For COCP Type:</strong> SafeCustodyDate (dd-MM-yy format, required), AccountName (required)</p>
+                  <p><strong>For Postpaid Type:</strong> BillDate (dd-MM-yy format, required), PDBill (Yes|No, defaults to No)</p>
+                  <p className="font-semibold mt-2">Date Format:</p>
+                  <p>Recommended format: <code className="bg-muted px-1 rounded">dd-MM-yy</code> (e.g., 15-03-26 for March 15, 2026)</p>
+                  <p>Also accepted: dd-MM-yyyy, MM-dd-yyyy, yyyy-MM-dd, MM/dd/yyyy, yyyy/MM/dd, M/d/yy, M/d/yyyy, MM/dd/yy</p>
+                  <p className="font-semibold mt-2">Important Notes:</p>
+                  <p>• <strong>Non-RTP Records:</strong> Once imported, the system automatically converts them to RTP on the specified RTPDate.</p>
+                  <p>• <strong>Spaces are Trimmed:</strong> Leading/trailing spaces in names and text are automatically removed.</p>
+                  <p>• <strong>Empty Cells:</strong> Leave optional fields blank/empty (not "N/A" or "NULL").</p>
+                </div>
              </CardContent>
            </Card>
            <Card>
@@ -290,14 +341,27 @@ export default function ImportExportPage() {
         {importResult && (
             <Alert variant={importResult.failedCount > 0 ? "destructive" : "default"} className={importResult.failedCount === 0 ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : ""}>
                 <Terminal className="h-4 w-4" />
-                <AlertTitle>Import Result</AlertTitle>
-                <AlertDescription>
-                   {importResult.successCount} created, {importResult.updatedCount} updated, {importResult.failedCount} failed.
+                <AlertTitle>{importResult.failedCount === 0 ? "✓ Import Successful" : "⚠ Import Completed with Errors"}</AlertTitle>
+                <AlertDescription className="space-y-2">
+                   <div>
+                     <strong>Summary:</strong> {importResult.successCount} created, {importResult.updatedCount} updated, {importResult.failedCount} failed.
+                   </div>
                    {failedRecords.length > 0 && (
-                     <Button variant="link" size="sm" className="pl-1 h-auto py-0" onClick={handleExportFailed}>
-                        <Download className="mr-1 h-3 w-3" />
-                        Download failed records report.
-                    </Button>
+                     <div>
+                       <strong className="text-red-600">Failed Records Summary:</strong>
+                       <ul className="text-xs mt-1 space-y-1 max-h-32 overflow-y-auto">
+                         {failedRecords.slice(0, 5).map((record, idx) => (
+                           <li key={idx} className="text-red-600">
+                             • Mobile {record.record.Mobile}: {record.reason}
+                           </li>
+                         ))}
+                         {failedRecords.length > 5 && <li className="text-red-600">... and {failedRecords.length - 5} more</li>}
+                       </ul>
+                       <Button variant="link" size="sm" className="pl-0 h-auto py-1 mt-2" onClick={handleExportFailed}>
+                          <Download className="mr-1 h-3 w-3" />
+                          Download detailed failed records report
+                      </Button>
+                     </div>
                    )}
                 </AlertDescription>
             </Alert>

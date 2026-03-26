@@ -685,25 +685,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const batch = writeBatch(db);
       const updatedIds: string[] = [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
       numbers.forEach(num => {
         if (num.status === 'Non-RTP' && num.rtpDate) {
           const rtpDateObj = num.rtpDate.toDate();
-          if (isValid(rtpDateObj) && (isToday(rtpDateObj) || isPast(rtpDateObj))) {
-            const docRef = doc(db, 'numbers', num.id);
-            const historyEvent = createLifecycleEvent('RTP Status Changed', 'Number automatically became RTP as per schedule.', 'System');
-            batch.update(docRef, { status: 'RTP', rtpDate: null, history: arrayUnion(historyEvent) });
-            addActivity({
-              employeeName: 'System',
-              action: 'Auto-updated to RTP',
-              description: `Number ${num.mobile} automatically became RTP.`
-            }, false);
-            updatedIds.push(num.id);
+          if (isValid(rtpDateObj)) {
+            const rtpDateOnly = new Date(rtpDateObj);
+            rtpDateOnly.setHours(0, 0, 0, 0);
+            
+            const shouldConvert = isToday(rtpDateObj) || isPast(rtpDateObj);
+            
+            console.log(`[RTP CHECKER] Mobile: ${num.mobile}, Status: ${num.status}, RTPDate: ${rtpDateObj.toISOString()}, Today: ${today.toISOString()}, ShouldConvert: ${shouldConvert}`);
+            
+            if (shouldConvert) {
+              const docRef = doc(db, 'numbers', num.id);
+              const historyEvent = createLifecycleEvent('RTP Status Changed', 'Number automatically became RTP as per schedule.', 'System');
+              batch.update(docRef, { status: 'RTP', rtpDate: null, history: arrayUnion(historyEvent) });
+              addActivity({
+                employeeName: 'System',
+                action: 'Auto-updated to RTP',
+                description: `Number ${num.mobile} automatically became RTP because RTPDate (${rtpDateObj.toLocaleDateString()}) has passed.`
+              }, false);
+              updatedIds.push(num.id);
+              console.log(`[RTP CONVERTER] Converting ${num.mobile} to RTP - date passed`);
+            }
           }
         }
       });
 
       if (updatedIds.length > 0) {
+        console.log(`[RTP CONVERTER] Converting ${updatedIds.length} records to RTP`);
         setRecentlyAutoRtpIds(updatedIds);
         setTimeout(() => setRecentlyAutoRtpIds([]), 5 * 60 * 1000); // Clear after 5 minutes
 
@@ -2040,12 +2053,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const processedMobiles = new Set<string>();
 
     const parseDate = (rawDate: any): Date | null => {
+      // Handle null, undefined, and empty strings
+      if (!rawDate || rawDate?.toString().trim() === '') return null;
+      
       if (rawDate instanceof Date && isValid(rawDate)) return rawDate;
       if (typeof rawDate === 'string') {
-        const dateFormats = ['dd-MM-yyyy', 'MM-dd-yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'yyyy/MM/dd', "M/d/yy", "M/d/yyyy", "MM/dd/yy"];
+        const trimmedDate = rawDate.trim();
+        if (!trimmedDate) return null;
+        
+        // IMPORTANT: Order matters! Try more specific formats first
+        const dateFormats = [
+          'dd-MM-yy',      // ← ADDED: Support 2-digit year with hyphens
+          'dd-MM-yyyy',    // 15-03-2026
+          'MM-dd-yyyy',    // 03-15-2026
+          'yyyy-MM-dd',    // 2026-03-15
+          'MM/dd/yyyy',    // 03/15/2026
+          'yyyy/MM/dd',    // 2026/03/15
+          'M/d/yy',        // 3/15/26
+          'M/d/yyyy',      // 3/15/2026
+          'MM/dd/yy'       // 03/15/26
+        ];
         for (const formatStr of dateFormats) {
-          const parsed = parse(rawDate, formatStr, new Date());
-          if (isValid(parsed)) return parsed;
+          const parsed = parse(trimmedDate, formatStr, new Date());
+          if (isValid(parsed)) {
+            console.log(`[DATE PARSE] "${trimmedDate}" parsed as "${formatStr}" → ${parsed.toISOString()}`);
+            return parsed;
+          }
         }
       }
       return null;
@@ -2067,92 +2100,148 @@ export function AppProvider({ children }: { children: ReactNode }) {
         continue;
       }
 
-      const status = record.Status;
+      const status = record.Status?.trim();
       if (!status || !['RTP', 'Non-RTP'].includes(status)) {
         failedRecords.push({ record, reason: 'Status is a required field. Must be "RTP" or "Non-RTP".' });
         continue;
       }
 
-      const uploadStatus = ['Pending', 'Done'].includes(record.UploadStatus) ? record.UploadStatus : 'Pending';
-      const numberType = ['Prepaid', 'Postpaid', 'COCP'].includes(record.NumberType) ? record.NumberType : 'Prepaid';
-      const ownershipType = ['Individual', 'Partnership'].includes(record.OwnershipType) ? record.OwnershipType : 'Individual';
-      const partnerName = record.PartnerName?.trim();
+      // Validate and trim NumberType
+      const numberTypeTrimmed = record.NumberType?.trim().toLowerCase();
+      const numberTypeMap: { [key: string]: 'Prepaid' | 'Postpaid' | 'COCP' } = {
+        'prepaid': 'Prepaid',
+        'postpaid': 'Postpaid',
+        'cocp': 'COCP'
+      };
+      const numberType = numberTypeMap[numberTypeTrimmed] || 'Prepaid';
 
+      const uploadStatusTrimmed = record.UploadStatus?.trim();
+      const uploadStatus = ['Pending', 'Done'].includes(uploadStatusTrimmed) ? uploadStatusTrimmed : 'Pending';
+      
+      const ownershipTypeTrimmed = record.OwnershipType?.trim();
+      const ownershipType = ['Individual', 'Partnership'].includes(ownershipTypeTrimmed) ? ownershipTypeTrimmed : 'Individual';
+      const partnerName = record.PartnerName?.toString().trim();
+
+      // Partnership ownership requires PartnerName
       if (ownershipType === 'Partnership' && !partnerName) {
         failedRecords.push({ record, reason: 'PartnerName is required for Partnership ownership.' });
         continue;
       }
 
-      const safeCustodyDate = parseDate(record.SafeCustodyDate);
-      if (numberType === 'COCP' && !safeCustodyDate) {
-        failedRecords.push({ record, reason: 'Invalid or missing SafeCustodyDate (required for COCP).' });
+      // Validate PurchaseDate first (required for all types)
+      const purchaseDate = parseDate(record.PurchaseDate);
+      if (!purchaseDate) {
+        failedRecords.push({ record, reason: 'Invalid or missing PurchaseDate. Expected format: dd-MM-yyyy or similar.' });
         continue;
       }
 
-      const accountName = record.AccountName;
-      if (numberType === 'COCP' && !accountName) {
-        failedRecords.push({ record, reason: 'Missing AccountName (required for COCP).' });
+      // Validate PurchasePrice
+      const purchasePriceValue = record.PurchasePrice?.toString().trim();
+      const purchasePrice = parseFloat(purchasePriceValue);
+      if (isNaN(purchasePrice) || purchasePrice < 0) {
+        failedRecords.push({ record, reason: 'Invalid or missing PurchasePrice. Must be a non-negative number.' });
         continue;
       }
 
-      const billDate = parseDate(record.BillDate);
-      if (numberType === 'Postpaid' && !billDate) {
-        failedRecords.push({ record, reason: 'Invalid or missing BillDate (required for Postpaid).' });
-        continue;
-      }
-
+      // Validate RTPDate for Non-RTP status
       let rtpDate: Date | null = null;
       if (status === 'Non-RTP') {
         rtpDate = parseDate(record.RTPDate);
         if (!rtpDate) {
-          failedRecords.push({ record, reason: 'Invalid or missing RTPDate (required for Non-RTP status).' });
+          failedRecords.push({ record, reason: 'Invalid or missing RTPDate (required for Non-RTP status). Expected format: dd-MM-yyyy or similar.' });
           continue;
         }
       }
 
-      const purchaseDate = parseDate(record.PurchaseDate);
-      if (!purchaseDate) {
-        failedRecords.push({ record, reason: 'Invalid or missing PurchaseDate.' });
-        continue;
+      // Validate COCP specific fields
+      if (numberType === 'COCP') {
+        const safeCustodyDate = parseDate(record.SafeCustodyDate);
+        if (!safeCustodyDate) {
+          failedRecords.push({ record, reason: 'Invalid or missing SafeCustodyDate (required for COCP). Expected format: dd-MM-yyyy or similar.' });
+          continue;
+        }
+
+        const accountName = record.AccountName?.toString().trim();
+        if (!accountName) {
+          failedRecords.push({ record, reason: 'Missing AccountName (required for COCP).' });
+          continue;
+        }
       }
 
-      const purchasePrice = parseFloat(record.PurchasePrice);
-      if (isNaN(purchasePrice)) {
-        failedRecords.push({ record, reason: 'Invalid or missing PurchasePrice. Must be a number.' });
-        continue;
+      // Validate Postpaid specific fields
+      if (numberType === 'Postpaid') {
+        const billDate = parseDate(record.BillDate);
+        if (!billDate) {
+          failedRecords.push({ record, reason: 'Invalid or missing BillDate (required for Postpaid). Expected format: dd-MM-yyyy or similar.' });
+          continue;
+        }
+
+        const pdBillValue = record.PDBill?.toString().trim();
+        if (!['Yes', 'No'].includes(pdBillValue)) {
+          failedRecords.push({ record, reason: 'Invalid PDBill (required for Postpaid). Must be "Yes" or "No".' });
+          continue;
+        }
       }
 
-      const salePrice = record.SalePrice ? parseFloat(record.SalePrice) : 0;
-      const assignedTo = record.AssignedTo?.trim();
-      const assignedUser = employees.includes(assignedTo) ? assignedTo : 'Unassigned';
+      // Parse SalePrice safely
+      const salePriceValue = record.SalePrice?.toString().trim();
+      const salePrice = salePriceValue && !isNaN(parseFloat(salePriceValue)) ? parseFloat(salePriceValue) : 0;
+
+      // Validate and assign LocationType
+      const locationTypeTrimmed = record.LocationType?.trim();
+      const locationType = ['Store', 'Employee', 'Dealer'].includes(locationTypeTrimmed) ? locationTypeTrimmed : 'Store';
+
+      // Validate AssignedTo - trim and check against employees list (case-insensitive matching)
+      const assignedToRaw = record.AssignedTo?.toString().trim();
+      let assignedUser = 'Unassigned';
+      
+      if (assignedToRaw) {
+        // Try exact match first
+        if (employees.includes(assignedToRaw)) {
+          assignedUser = assignedToRaw;
+        } else {
+          // Try case-insensitive match
+          const lowerAssignedTo = assignedToRaw.toLowerCase();
+          const matchedEmployee = employees.find(emp => emp.toLowerCase() === lowerAssignedTo);
+          assignedUser = matchedEmployee || 'Unassigned';
+        }
+      }
 
       const recordData: Partial<NumberRecord> = {
         mobile: mobile,
         name: assignedUser,
         assignedTo: assignedUser,
         numberType: numberType,
-        status: status,
-        uploadStatus: uploadStatus,
+        status: status as 'RTP' | 'Non-RTP',
+        uploadStatus: uploadStatus as 'Pending' | 'Done',
         rtpDate: rtpDate ? Timestamp.fromDate(rtpDate) : null,
-        purchaseFrom: record.PurchaseFrom || 'N/A',
+        purchaseFrom: record.PurchaseFrom?.toString().trim() || 'N/A',
         purchasePrice: purchasePrice,
-        salePrice: isNaN(salePrice) ? 0 : salePrice,
+        salePrice: salePrice,
         purchaseDate: Timestamp.fromDate(purchaseDate),
-        currentLocation: record.CurrentLocation || 'N/A',
-        locationType: ['Store', 'Employee', 'Dealer'].includes(record.LocationType) ? record.LocationType : 'Store',
-        notes: record.Notes || '',
-        ownershipType: ownershipType,
+        currentLocation: record.CurrentLocation?.toString().trim() || 'N/A',
+        locationType: locationType,
+        notes: record.Notes?.toString().trim() || '',
+        ownershipType: ownershipType as 'Individual' | 'Partnership',
         partnerName: partnerName || '',
         sum: calculateDigitalRoot(mobile),
       };
 
-      if (numberType === 'COCP') {
-        recordData.safeCustodyDate = safeCustodyDate ? Timestamp.fromDate(safeCustodyDate) : null;
-        recordData.accountName = accountName;
+      // Debug logging for status field
+      if (record.Mobile === mobile) {
+        console.log(`[IMPORT DEBUG] Mobile: ${mobile}, CSV Status: "${record.Status}", Parsed Status: "${status}", RTPDate: ${rtpDate ? 'SET' : 'NULL'}`);
       }
+
+      if (numberType === 'COCP') {
+        const safeCustodyDate = parseDate(record.SafeCustodyDate);
+        recordData.safeCustodyDate = safeCustodyDate ? Timestamp.fromDate(safeCustodyDate) : null;
+        recordData.accountName = record.AccountName?.toString().trim() || '';
+      }
+      
       if (numberType === 'Postpaid') {
+        const billDate = parseDate(record.BillDate);
         recordData.billDate = billDate ? Timestamp.fromDate(billDate) : null;
-        recordData.pdBill = ['Yes', 'No'].includes(record.PDBill) ? record.PDBill : 'No';
+        recordData.pdBill = (['Yes', 'No'].includes(record.PDBill?.toString().trim())) ? record.PDBill?.toString().trim() : 'No';
       }
 
       const performedBy = user.displayName || user.email || 'User';
@@ -2165,9 +2254,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (creations.length > 0) {
       const batch = writeBatch(db);
 
-      creations.forEach(record => {
+      creations.forEach((record, idx) => {
         const newDocRef = doc(collection(db, 'numbers'));
-        batch.set(newDocRef, sanitizeObjectForFirestore(record));
+        const sanitized = sanitizeObjectForFirestore(record);
+        
+        // Debug: Log what's being saved
+        console.log(`[FIRESTORE SAVE] Record ${idx}:`, {
+          mobile: sanitized.mobile,
+          status: sanitized.status,
+          statusType: typeof sanitized.status,
+          rtpDate: sanitized.rtpDate ? 'SET' : 'NULL'
+        });
+        
+        batch.set(newDocRef, sanitized);
       });
 
       await batch.commit().catch(async (serverError) => {
@@ -2183,6 +2282,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
+    console.log(`[IMPORT SUMMARY] Total records processed: ${records.length}, Created: ${creations.length}, Failed: ${failedRecords.length}`);
     return { successCount: creations.length, updatedCount: 0, failedRecords };
   };
 
