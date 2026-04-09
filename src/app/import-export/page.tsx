@@ -284,24 +284,11 @@ export default function ImportExportPage() {
 
   return (
     <>
-      <PageHeader
+      {/* <PageHeader
         title="Manage Numbers via CSV"
         description="Bulk import to create numbers, and export your number inventory."
-      />
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           <Card>
-             <CardHeader>
-                <CardTitle className="flex items-center gap-2"><FileInput className="w-5 h-5 text-primary" /> Import from CSV</CardTitle>
-                <CardDescription>Upload a CSV file to add new numbers. Existing numbers will be skipped.</CardDescription>
-             </CardHeader>
-             <CardContent>
-                <Button onClick={handleImportClick} disabled={isImporting}>
-                  {isImporting ? <Spinner className="mr-2 h-4 w-4" /> : <FileInput className="mr-2 h-4 w-4" />}
-                  {isImporting ? 'Importing...' : 'Import from CSV'}
-                </Button>
-                <input type="file" id="import-file-input" className="hidden" accept=".csv" onChange={handleFileImport} />
-                <div className="text-xs text-muted-foreground mt-3 space-y-1">
+      /> */}
+      <div className="text-xs text-muted-foreground mt-3 pb-2 space-y-1">
                   <p className="font-semibold">Required Headers:</p>
                   <p>Mobile, NumberType, PurchaseFrom, PurchasePrice, PurchaseDate, CurrentLocation, LocationType, Status, OwnershipType</p>
                   <p className="font-semibold mt-2">Optional Fields:</p>
@@ -318,6 +305,20 @@ export default function ImportExportPage() {
                   <p>• <strong>Spaces are Trimmed:</strong> Leading/trailing spaces in names and text are automatically removed.</p>
                   <p>• <strong>Empty Cells:</strong> Leave optional fields blank/empty (not "N/A" or "NULL").</p>
                 </div>
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+           <Card>
+             <CardHeader>
+                <CardTitle className="flex items-center gap-2"><FileInput className="w-5 h-5 text-primary" /> Import from CSV</CardTitle>
+                <CardDescription>Upload a CSV file to add new numbers. Existing numbers will be skipped.</CardDescription>
+             </CardHeader>
+             <CardContent>
+                <Button onClick={handleImportClick} disabled={isImporting}>
+                  {isImporting ? <Spinner className="mr-2 h-4 w-4" /> : <FileInput className="mr-2 h-4 w-4" />}
+                  {isImporting ? 'Importing...' : 'Import from CSV'}
+                </Button>
+                <input type="file" id="import-file-input" className="hidden" accept=".csv" onChange={handleFileImport} />
+                
              </CardContent>
            </Card>
            <Card>
