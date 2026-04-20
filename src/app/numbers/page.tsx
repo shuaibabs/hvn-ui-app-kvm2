@@ -49,6 +49,8 @@ const initialAdvancedSearchState: AdvancedSearchState = {
   sum: '',
   maxContain: '',
   mostContains: false,
+  minPrice: '',
+  maxPrice: ''
 };
 
 
@@ -558,6 +560,7 @@ export default function AllNumbersPage() {
                 <SortableHeader column="sum" label="Sum" />
                 <SortableHeader column="twoDigitSum" label="2-Digit Sum" />
                 <SortableHeader column="purchasePrice" label="Purchase Price" />
+                <SortableHeader column="salePrice" label="Sale Price" />
                 <SortableHeader column="numberType" label="Number Type" />
                 <SortableHeader column="ownershipType" label="Ownership Type" />
                 <SortableHeader column="partnerName" label="Partner Name" />
@@ -601,6 +604,7 @@ export default function AllNumbersPage() {
                     <TableCell>{num.sum}</TableCell>
                     <TableCell>{calculateSimpleSum(num.mobile)}</TableCell>
                     <TableCell>₹{num.purchasePrice.toLocaleString()}</TableCell>
+                    <TableCell>₹{num.salePrice.toLocaleString()}</TableCell>
                     <TableCell>{num.numberType}</TableCell>
                     <TableCell>{num.ownershipType}</TableCell>
                     <TableCell>{num.partnerName || 'N/A'}</TableCell>

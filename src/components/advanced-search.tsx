@@ -21,6 +21,8 @@ export type AdvancedSearchState = {
   sum: string;
   maxContain: string;
   mostContains: boolean;
+  minPrice: string;
+  maxPrice: string;
 };
 
 type AdvancedSearchProps = {
@@ -120,6 +122,14 @@ export function AdvancedSearch({ onSearchChange, initialState, onClear }: Advanc
                 <div className="space-y-2">
                   <Label htmlFor="maxContain">Max-Contain (Frequency)</Label>
                   <Input id="maxContain" name="maxContain" placeholder="e.g: 3" value={searchState.maxContain} onChange={handleInputChange} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="minPrice">Min Sale Price</Label>
+                  <Input id="minPrice" name="minPrice" type="number" placeholder="e.g: 500" value={searchState.minPrice} onChange={handleInputChange} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="maxPrice">Max Sale Price</Label>
+                  <Input id="maxPrice" name="maxPrice" type="number" placeholder="e.g: 5000" value={searchState.maxPrice} onChange={handleInputChange} />
                 </div>
               </div>
               <div className="flex justify-end gap-2">

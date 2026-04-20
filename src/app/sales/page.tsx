@@ -21,6 +21,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/context/auth-context';
 import Papa from 'papaparse';
 import { Input } from '@/components/ui/input';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100, 250, 500, 1000, 5000];
@@ -136,7 +138,7 @@ export default function SalesPage() {
   }
 
   const handleExportSelected = () => {
-    const selectedData = sales.filter(s => selectedRows.includes(s.id));
+    const selectedData = sales.filter((s: SaleRecord) => selectedRows.includes(s.id));
     if (selectedData.length === 0) {
       toast({
         variant: "destructive",
@@ -158,7 +160,72 @@ export default function SalesPage() {
     setSelectedRows([]);
   }
 
-  const selectedSaleRecords = sales.filter(s => selectedRows.includes(s.id));
+  const exportToPdf = (dataToExport: SaleRecord[], fileName: string) => {
+    const doc = new jsPDF();
+    
+    // Add Header
+    doc.setFontSize(20);
+    doc.setTextColor(40);
+    doc.text("HVN SALES REPORT", 14, 22);
+    
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${format(new Date(), 'PPP p')}`, 14, 30);
+    doc.text(`Total Records: ${dataToExport.length}`, 14, 36);
+
+    // Summary Section
+    const totalBilled = dataToExport.reduce((sum, s) => sum + (s.salePrice || 0), 0);
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+    doc.text(`Total Billed: INR ${totalBilled.toLocaleString()}`, 14, 46);
+
+    const tableColumn = ["Sr.No", "Mobile", "Sum", "Sold To", "Sale Price", "Sale Date", "Status"];
+    const tableRows = dataToExport.map(s => [
+      s.srNo,
+      s.mobile,
+      s.sum,
+      s.soldTo,
+      `INR ${s.salePrice.toLocaleString()}`,
+      format(s.saleDate.toDate(), 'dd-MM-yyyy'),
+      s.uploadStatus
+    ]);
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 55,
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 245, 245] }
+    });
+
+    doc.save(fileName);
+  }
+
+  const handleExportPdfSelected = () => {
+    const selectedData = sales.filter((s: SaleRecord) => selectedRows.includes(s.id));
+    if (selectedData.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "No sales selected",
+        description: "Please select at least one sale to export to PDF.",
+      });
+      return;
+    }
+    exportToPdf(selectedData, 'sales_report.pdf');
+    addActivity({
+      employeeName: user?.displayName || 'User',
+      action: 'Exported PDF',
+      description: `Exported ${selectedData.length} selected sale(s) to PDF.`
+    });
+    toast({
+      title: "PDF Export Successful",
+      description: `${selectedData.length} selected sales have been exported to PDF.`,
+    });
+    setSelectedRows([]);
+  }
+
+  const selectedSaleRecords = sales.filter((s: SaleRecord) => selectedRows.includes(s.id));
 
 
   const requestSort = (key: SortableColumn) => {
@@ -240,7 +307,11 @@ export default function SalesPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <Button variant="outline" onClick={handleExportSelected} disabled={loading || selectedRows.length === 0}>
                 <Download className="mr-2 h-4 w-4" />
-                Export ({selectedRows.length})
+                CSV ({selectedRows.length})
+              </Button>
+              <Button variant="outline" onClick={handleExportPdfSelected} disabled={loading || selectedRows.length === 0}>
+                <Download className="mr-2 h-4 w-4" />
+                PDF ({selectedRows.length})
               </Button>
             </div>
           )}

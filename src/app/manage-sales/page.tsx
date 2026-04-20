@@ -16,6 +16,8 @@ import { format } from 'date-fns';
 import Papa from 'papaparse';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { SaleDetailsModal } from '@/components/sale-details-modal';
@@ -38,6 +40,8 @@ export default function ManageSalesPage() {
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
 
   const soldToOptions = useMemo(() => {
     const allVendors = sales.map(s => s.soldTo).filter(Boolean);
@@ -45,11 +49,16 @@ export default function ManageSalesPage() {
   }, [sales]);
 
   const filteredSales = useMemo(() => {
-    return sales.filter(sale =>
-      (soldToFilter === 'all' || sale.soldTo === soldToFilter) &&
-      (sale.mobile && sale.mobile.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  }, [sales, soldToFilter, searchTerm]);
+    return sales.filter(sale => {
+      const saleDate = sale.saleDate.toDate();
+      const monthMatch = selectedMonth === 'all' || (saleDate.getMonth() + 1).toString() === selectedMonth;
+      const yearMatch = selectedYear === 'all' || saleDate.getFullYear().toString() === selectedYear;
+      const vendorMatch = soldToFilter === 'all' || sale.soldTo === soldToFilter;
+      const searchMatch = !searchTerm || (sale.mobile && sale.mobile.toLowerCase().includes(searchTerm.toLowerCase()));
+      
+      return monthMatch && yearMatch && vendorMatch && searchMatch;
+    });
+  }, [sales, soldToFilter, searchTerm, selectedMonth, selectedYear]);
 
   const { totalPurchaseAmount, totalSaleAmount } = useMemo(() => {
     return filteredSales.reduce((acc, sale) => {
@@ -60,14 +69,18 @@ export default function ManageSalesPage() {
   }, [filteredSales]);
 
   const { totalPaid, amountRemaining } = useMemo(() => {
-    const relevantPayments = soldToFilter === 'all'
-      ? salesPayments
-      : salesPayments.filter(p => p.vendorName === soldToFilter);
+    const relevantPayments = salesPayments.filter(p => {
+      const pDate = p.paymentDate.toDate();
+      const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
+      const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
+      const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
+      return vendorMatch && monthMatch && yearMatch;
+    });
 
     const paid = relevantPayments.reduce((sum, p) => sum + p.amount, 0);
 
     return { totalPaid: paid, amountRemaining: totalSaleAmount - paid };
-  }, [salesPayments, soldToFilter, totalSaleAmount]);
+  }, [salesPayments, soldToFilter, totalSaleAmount, selectedMonth, selectedYear]);
 
   const totalProfitLoss = totalSaleAmount - totalPurchaseAmount;
 
@@ -184,6 +197,82 @@ export default function ManageSalesPage() {
     });
   };
 
+  const exportToPdf = () => {
+    if (filteredSales.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "No data to export",
+        description: "There are no sales records matching the current filter."
+      });
+      return;
+    }
+
+    const doc = new jsPDF('l', 'mm', 'a4'); // Landscape for more columns
+    
+    // Header
+    doc.setFontSize(22);
+    doc.setTextColor(41, 128, 185);
+    doc.text("HVN MANAGE SALES REPORT", 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${format(new Date(), 'PPP p')}`, 14, 28);
+    doc.text(`Filter: ${soldToFilter === 'all' ? 'All Vendors' : soldToFilter} | Period: ${selectedMonth === 'all' ? 'All Months' : format(new Date(2024, parseInt(selectedMonth)-1), 'MMMM')} ${selectedYear}`, 14, 34);
+
+    // Summary Section
+    doc.setDrawColor(200);
+    doc.line(14, 38, 283, 38);
+    
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+    doc.text(`Total Records: ${filteredSales.length}`, 14, 45);
+    doc.text(`Total Billed: INR ${totalSaleAmount.toLocaleString()}`, 70, 45);
+    doc.text(`Total Purchase: INR ${totalPurchaseAmount.toLocaleString()}`, 130, 45);
+    doc.text(`Profit/Loss: INR ${totalProfitLoss.toLocaleString()}`, 190, 45);
+    doc.text(`Remaining: INR ${amountRemaining.toLocaleString()}`, 240, 45);
+
+    const tableColumn = ["Sr.No", "Mobile", "Sum", "Purchase From", "Purchase Price", "Sold To", "Sale Price", "Sale Date"];
+    
+    const sortedRecords = [...filteredSales].sort((a, b) => 
+      b.saleDate.toDate().getTime() - a.saleDate.toDate().getTime()
+    );
+
+    const tableRows = sortedRecords.map(s => [
+      s.srNo,
+      s.mobile,
+      s.sum,
+      s.originalNumberData?.purchaseFrom || 'N/A',
+      `INR ${(s.originalNumberData?.purchasePrice || 0).toLocaleString()}`,
+      s.soldTo,
+      `INR ${s.salePrice.toLocaleString()}`,
+      format(s.saleDate.toDate(), 'dd-MM-yyyy')
+    ]);
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 55,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      margin: { top: 55 }
+    });
+
+    const fileName = `Sales_Report_${soldToFilter}_${selectedMonth}_${selectedYear}.pdf`;
+    doc.save(fileName);
+
+    addActivity({
+      employeeName: user?.displayName || 'User',
+      action: 'Exported PDF Sales Report',
+      description: `Exported ${filteredSales.length} sales records to PDF for: ${soldToFilter}.`
+    });
+
+    toast({
+      title: "PDF Export Successful",
+      description: `Sales report PDF has been downloaded.`,
+    });
+  };
+
   return (
     <>
       <PageHeader
@@ -197,7 +286,11 @@ export default function ManageSalesPage() {
           </Button>
           <Button onClick={exportToCsv} disabled={loading} variant="outline">
             <Download className="mr-2 h-4 w-4" />
-            Export CSV
+            CSV
+          </Button>
+          <Button onClick={exportToPdf} disabled={loading} variant="outline">
+            <Download className="mr-2 h-4 w-4" />
+            PDF
           </Button>
         </div>
       </PageHeader>
@@ -273,7 +366,7 @@ export default function ManageSalesPage() {
             />
           </div>
           <Select value={soldToFilter} onValueChange={handleSoldToFilterChange}>
-            <SelectTrigger className="w-full sm:w-[240px]">
+            <SelectTrigger className="w-full sm:w-[200px]">
               <SelectValue placeholder="Filter by Sold To" />
             </SelectTrigger>
             <SelectContent>
@@ -281,6 +374,32 @@ export default function ManageSalesPage() {
                 <SelectItem key={vendor} value={vendor}>
                   {vendor === 'all' ? 'All Vendors' : vendor}
                 </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Month" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Months</SelectItem>
+              {Array.from({ length: 12 }, (_, i) => (
+                <SelectItem key={i + 1} value={(i + 1).toString()}>
+                  {format(new Date(2024, i), 'MMMM')}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={selectedYear} onValueChange={setSelectedYear}>
+            <SelectTrigger className="w-[100px]">
+              <SelectValue placeholder="Year" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Years</SelectItem>
+              {[2024, 2025, 2026].map(year => (
+                <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
               ))}
             </SelectContent>
           </Select>
