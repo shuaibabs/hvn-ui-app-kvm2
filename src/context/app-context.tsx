@@ -308,7 +308,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // DEALER_PURCHASES (Numbers purchased from dealers)
       'Added Dealer Purchase': 'DEALER_PURCHASES',
       'Deleted Dealer Purchases': 'DEALER_PURCHASES',
-      'Recorded Payment': 'DEALER_PURCHASES', 
+      'Recorded Payment': 'DEALER_PURCHASES',
 
       // WORK_REMINDERS
       'Added Reminder': 'WORK_REMINDERS',
@@ -694,11 +694,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (isValid(rtpDateObj)) {
             const rtpDateOnly = new Date(rtpDateObj);
             rtpDateOnly.setHours(0, 0, 0, 0);
-            
+
             const shouldConvert = isToday(rtpDateObj) || isPast(rtpDateObj);
-            
+
             console.log(`[RTP CHECKER] Mobile: ${num.mobile}, Status: ${num.status}, RTPDate: ${rtpDateObj.toISOString()}, Today: ${today.toISOString()}, ShouldConvert: ${shouldConvert}`);
-            
+
             if (shouldConvert) {
               const docRef = doc(db, 'numbers', num.id);
               const historyEvent = createLifecycleEvent('RTP Status Changed', 'Number automatically became RTP as per schedule.', 'System');
@@ -1384,8 +1384,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let currentSrNo = getNextSrNo(numbers);
     const batch = writeBatch(db);
     const numbersCollection = collection(db, 'numbers');
+    const processedMobiles = new Set<string>();
 
     validNumbers.forEach(mobile => {
+      if (processedMobiles.has(mobile)) return;
+      processedMobiles.add(mobile);
+
       const newDocRef = doc(numbersCollection);
       const newNumber: Partial<NumberRecord> = {
         ...data,
@@ -2055,12 +2059,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const parseDate = (rawDate: any): Date | null => {
       // Handle null, undefined, and empty strings
       if (!rawDate || rawDate?.toString().trim() === '') return null;
-      
+
       if (rawDate instanceof Date && isValid(rawDate)) return rawDate;
       if (typeof rawDate === 'string') {
         const trimmedDate = rawDate.trim();
         if (!trimmedDate) return null;
-        
+
         // IMPORTANT: Order matters! Try more specific formats first
         const dateFormats = [
           'dd-MM-yy',      // ← ADDED: Support 2-digit year with hyphens
@@ -2117,7 +2121,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const uploadStatusTrimmed = record.UploadStatus?.trim();
       const uploadStatus = ['Pending', 'Done'].includes(uploadStatusTrimmed) ? uploadStatusTrimmed : 'Pending';
-      
+
       const ownershipTypeTrimmed = record.OwnershipType?.trim();
       const ownershipType = ['Individual', 'Partnership'].includes(ownershipTypeTrimmed) ? ownershipTypeTrimmed : 'Individual';
       const partnerName = record.PartnerName?.toString().trim();
@@ -2194,7 +2198,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Validate AssignedTo - trim and check against employees list (case-insensitive matching)
       const assignedToRaw = record.AssignedTo?.toString().trim();
       let assignedUser = 'Unassigned';
-      
+
       if (assignedToRaw) {
         // Try exact match first
         if (employees.includes(assignedToRaw)) {
@@ -2237,7 +2241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         recordData.safeCustodyDate = safeCustodyDate ? Timestamp.fromDate(safeCustodyDate) : null;
         recordData.accountName = record.AccountName?.toString().trim() || '';
       }
-      
+
       if (numberType === 'Postpaid') {
         const billDate = parseDate(record.BillDate);
         recordData.billDate = billDate ? Timestamp.fromDate(billDate) : null;
@@ -2257,7 +2261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creations.forEach((record, idx) => {
         const newDocRef = doc(collection(db, 'numbers'));
         const sanitized = sanitizeObjectForFirestore(record);
-        
+
         // Debug: Log what's being saved
         console.log(`[FIRESTORE SAVE] Record ${idx}:`, {
           mobile: sanitized.mobile,
@@ -2265,7 +2269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           statusType: typeof sanitized.status,
           rtpDate: sanitized.rtpDate ? 'SET' : 'NULL'
         });
-        
+
         batch.set(newDocRef, sanitized);
       });
 
