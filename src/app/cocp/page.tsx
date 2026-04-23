@@ -24,6 +24,22 @@ import { useAuth } from '@/context/auth-context';
 import { Input } from '@/components/ui/input';
 import { BulkEditCocpDateModal } from '@/components/bulk-edit-cocp-date-modal';
 import { BulkChangeCocpDateModal } from '@/components/bulk-change-cocp-date-modal';
+import { AdvancedSearch, type AdvancedSearchState } from '@/components/advanced-search';
+
+const initialAdvancedSearchState: AdvancedSearchState = {
+  startWith: '',
+  anywhere: '',
+  endWith: '',
+  mustContain: '',
+  notContain: '',
+  onlyContain: '',
+  total: '',
+  sum: '',
+  maxContain: '',
+  mostContains: false,
+  minPrice: '',
+  maxPrice: ''
+};
 
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100, 250, 500, 1000, 5000];
@@ -42,6 +58,7 @@ export default function CocpPage() {
   const [isBulkEditModalOpen, setIsBulkEditModalOpen] = useState(false);
   const [isBulkChangeDateModalOpen, setIsBulkChangeDateModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [advancedSearch, setAdvancedSearch] = useState<AdvancedSearchState>(initialAdvancedSearchState);
 
   const cocpNumbers = useMemo(() => {
     return numbers.filter(num => num.numberType === 'COCP');
@@ -52,13 +69,64 @@ export default function CocpPage() {
       num.mobile && num.mobile.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // Primary sort: bring records with arrived safe custody date to the top
-    sortableItems.sort((a, b) => {
-      const aHasArrived = a.safeCustodyDate && (isToday(a.safeCustodyDate.toDate()) || isPast(a.safeCustodyDate.toDate()));
-      const bHasArrived = b.safeCustodyDate && (isToday(b.safeCustodyDate.toDate()) || isPast(b.safeCustodyDate.toDate()));
+    // Advanced search filtering
+    if (Object.values(advancedSearch).some(v => v)) {
+      sortableItems = sortableItems.filter(num => {
+        const { startWith, endWith, anywhere, mustContain, notContain, onlyContain, total, sum, maxContain, minPrice, maxPrice } = advancedSearch;
 
-      if (aHasArrived && !bHasArrived) return -1;
-      if (!aHasArrived && bHasArrived) return 1;
+        if (startWith && !num.mobile.startsWith(startWith)) return false;
+        if (endWith && !num.mobile.endsWith(endWith)) return false;
+        if (anywhere && !num.mobile.includes(anywhere)) return false;
+
+        if (mustContain) {
+          const mustContainDigits = mustContain.split(',').map(d => d.trim()).filter(Boolean);
+          if (!mustContainDigits.every(digit => num.mobile.includes(digit))) return false;
+        }
+
+        if (notContain) {
+          const notContainDigits = notContain.split(',').map(d => d.trim()).filter(Boolean);
+          if (notContainDigits.some(digit => num.mobile.includes(digit))) return false;
+        }
+
+        if (onlyContain) {
+          const allowedDigits = new Set(onlyContain.split(''));
+          if (!num.mobile.split('').every(digit => allowedDigits.has(digit))) return false;
+        }
+
+        if (total) {
+          const digitSum = num.mobile.split('').reduce((acc, digit) => acc + parseInt(digit, 10), 0);
+          if (digitSum.toString() !== total) return false;
+        }
+
+        if (sum && num.sum.toString() !== sum) return false;
+
+        if (maxContain) {
+          const digitCounts = num.mobile.split('').reduce((acc, digit) => {
+            acc[digit] = (acc[digit] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>);
+          if (Math.max(...Object.values(digitCounts)) > parseInt(maxContain, 10)) return false;
+        }
+
+        if (minPrice && Number(num.salePrice) < Number(minPrice)) return false;
+        if (maxPrice && Number(num.salePrice) > Number(maxPrice)) return false;
+
+        return true;
+      });
+    }
+
+    // Primary sort: bring records with arrived custody dates to the top
+    sortableItems.sort((a, b) => {
+      const aSafeArrived = a.safeCustodyDate && (isToday(a.safeCustodyDate.toDate()) || isPast(a.safeCustodyDate.toDate()));
+      const bSafeArrived = b.safeCustodyDate && (isToday(b.safeCustodyDate.toDate()) || isPast(b.safeCustodyDate.toDate()));
+      const aUnsafeArrived = a.unsafeCustodyDate && (isToday(a.unsafeCustodyDate.toDate()) || isPast(a.unsafeCustodyDate.toDate()));
+      const bUnsafeArrived = b.unsafeCustodyDate && (isToday(b.unsafeCustodyDate.toDate()) || isPast(b.unsafeCustodyDate.toDate()));
+
+      const aArrived = aSafeArrived || aUnsafeArrived;
+      const bArrived = bSafeArrived || bUnsafeArrived;
+
+      if (aArrived && !bArrived) return -1;
+      if (!aArrived && bArrived) return 1;
       return 0;
     });
 
@@ -66,10 +134,16 @@ export default function CocpPage() {
     if (sortConfig !== null) {
       sortableItems.sort((a, b) => {
         // Keep the primary sort order
-        const aHasArrived = a.safeCustodyDate && (isToday(a.safeCustodyDate.toDate()) || isPast(a.safeCustodyDate.toDate()));
-        const bHasArrived = b.safeCustodyDate && (isToday(b.safeCustodyDate.toDate()) || isPast(b.safeCustodyDate.toDate()));
-        if (aHasArrived && !bHasArrived) return -1;
-        if (!aHasArrived && bHasArrived) return 1;
+        const aSafeArrived = a.safeCustodyDate && (isToday(a.safeCustodyDate.toDate()) || isPast(a.safeCustodyDate.toDate()));
+        const bSafeArrived = b.safeCustodyDate && (isToday(b.safeCustodyDate.toDate()) || isPast(b.safeCustodyDate.toDate()));
+        const aUnsafeArrived = a.unsafeCustodyDate && (isToday(a.unsafeCustodyDate.toDate()) || isPast(a.unsafeCustodyDate.toDate()));
+        const bUnsafeArrived = b.unsafeCustodyDate && (isToday(b.unsafeCustodyDate.toDate()) || isPast(b.unsafeCustodyDate.toDate()));
+
+        const aArrived = aSafeArrived || aUnsafeArrived;
+        const bArrived = bSafeArrived || bUnsafeArrived;
+
+        if (aArrived && !bArrived) return -1;
+        if (!aArrived && bArrived) return 1;
 
         const aValue = a[sortConfig.key as keyof NumberRecord];
         const bValue = b[sortConfig.key as keyof NumberRecord];
@@ -94,7 +168,7 @@ export default function CocpPage() {
       });
     }
     return sortableItems;
-  }, [cocpNumbers, sortConfig, searchTerm]);
+  }, [cocpNumbers, sortConfig, searchTerm, advancedSearch]);
 
   const totalPages = Math.ceil(sortedNumbers.length / itemsPerPage);
   const paginatedNumbers = sortedNumbers.slice(
@@ -146,6 +220,7 @@ export default function CocpPage() {
       "Account Name": n.accountName,
       "RTP Date": n.rtpDate ? format(n.rtpDate.toDate(), 'yyyy-MM-dd') : 'N/A',
       "Safe Custody Date": n.safeCustodyDate ? format(n.safeCustodyDate.toDate(), 'yyyy-MM-dd') : 'N/A',
+      "Unsafe Custody Date": n.unsafeCustodyDate ? format(n.unsafeCustodyDate.toDate(), 'yyyy-MM-dd') : 'N/A',
     }));
 
     const csv = Papa.unparse(formattedData);
@@ -237,9 +312,13 @@ export default function CocpPage() {
       >
         <Button onClick={() => setIsBulkChangeDateModalOpen(true)} variant="outline">
           <Calendar className="mr-2 h-4 w-4" />
-          Bulk Change Date
         </Button>
       </PageHeader>
+      <AdvancedSearch
+        onSearchChange={setAdvancedSearch}
+        initialState={initialAdvancedSearchState}
+        onClear={() => setAdvancedSearch(initialAdvancedSearchState)}
+      />
       <div className="flex items-center justify-between gap-4 mb-4">
         <div className="flex items-center gap-4 flex-wrap">
           <Input
@@ -269,7 +348,7 @@ export default function CocpPage() {
               </Button>
               <Button variant="outline" onClick={() => setIsBulkEditModalOpen(true)}>
                 <Edit className="mr-2 h-4 w-4" />
-                Edit Safe Custody Date ({selectedRows.length})
+                Edit Custody Dates ({selectedRows.length})
               </Button>
             </div>
           )}
@@ -292,22 +371,25 @@ export default function CocpPage() {
               <SortableHeader column="sum" label="Sum" />
               <SortableHeader column="status" label="Status" />
               <SortableHeader column="rtpDate" label="RTP Date" />
-              <SortableHeader column="safeCustodyDate" label="Safe Custody Date" />
+              <SortableHeader column="safeCustodyDate" label="Safe Custody" />
+              <SortableHeader column="unsafeCustodyDate" label="Unsafe Custody" />
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSpinner colSpan={9} />
+              <TableSpinner colSpan={10} />
             ) : paginatedNumbers.length > 0 ? (
               paginatedNumbers.map((num) => {
-                const hasSafeCustodyDateArrived = num.safeCustodyDate && (isToday(num.safeCustodyDate.toDate()) || isPast(num.safeCustodyDate.toDate()));
+                const isSafeArrived = num.safeCustodyDate && (isToday(num.safeCustodyDate.toDate()) || isPast(num.safeCustodyDate.toDate()));
+                const isUnsafeArrived = num.unsafeCustodyDate && (isToday(num.unsafeCustodyDate.toDate()) || isPast(num.unsafeCustodyDate.toDate()));
+                const hasDateArrived = isSafeArrived || isUnsafeArrived;
 
                 return (
                   <TableRow
                     key={num.id}
                     data-state={selectedRows.includes(num.id) && "selected"}
-                    className={cn(hasSafeCustodyDateArrived && "bg-red-200 dark:bg-red-800/30 hover:bg-red-200/80 dark:hover:bg-red-800/40 data-[state=selected]:bg-red-300 dark:data-[state=selected]:bg-red-800/50")}
+                    className={cn(hasDateArrived && "bg-red-200 dark:bg-red-800/30 hover:bg-red-200/80 dark:hover:bg-red-800/40 data-[state=selected]:bg-red-300 dark:data-[state=selected]:bg-red-800/50")}
                   >
                     <TableCell>
                       <Checkbox
@@ -324,7 +406,12 @@ export default function CocpPage() {
                       <Badge variant={num.status === 'RTP' ? 'default' : 'destructive'} className={num.status === 'RTP' ? `bg-green-500/20 text-green-700` : `bg-red-500/20 text-red-700`}>{num.status}</Badge>
                     </TableCell>
                     <TableCell>{num.rtpDate ? format(num.rtpDate.toDate(), 'PPP') : 'N/A'}</TableCell>
-                    <TableCell>{num.safeCustodyDate ? format(num.safeCustodyDate.toDate(), 'PPP') : 'N/A'}</TableCell>
+                    <TableCell className={cn(isSafeArrived && "font-bold text-red-600 dark:text-red-400")}>
+                      {num.safeCustodyDate ? format(num.safeCustodyDate.toDate(), 'PPP') : 'N/A'}
+                    </TableCell>
+                    <TableCell className={cn(isUnsafeArrived && "font-bold text-red-600 dark:text-red-400")}>
+                      {num.unsafeCustodyDate ? format(num.unsafeCustodyDate.toDate(), 'PPP') : 'N/A'}
+                    </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -345,7 +432,7 @@ export default function CocpPage() {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center">
+                <TableCell colSpan={10} className="h-24 text-center">
                   {searchTerm ? `No COCP numbers found for "${searchTerm}".` : "No COCP numbers found."}
                 </TableCell>
               </TableRow>

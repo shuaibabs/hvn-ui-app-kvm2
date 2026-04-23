@@ -19,7 +19,11 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
 const formSchema = z.object({
-  safeCustodyDate: z.date({ required_error: 'A date is required.' }),
+  safeCustodyDate: z.date().optional(),
+  unsafeCustodyDate: z.date().optional(),
+}).refine(data => data.safeCustodyDate || data.unsafeCustodyDate, {
+  message: "At least one date must be provided.",
+  path: ["safeCustodyDate"],
 });
 
 type BulkEditCocpDateModalProps = {
@@ -29,8 +33,9 @@ type BulkEditCocpDateModalProps = {
 };
 
 export function BulkEditCocpDateModal({ isOpen, onClose, selectedNumbers }: BulkEditCocpDateModalProps) {
-  const { bulkUpdateSafeCustodyDate } = useApp();
-  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const { bulkUpdateSafeCustodyDate, bulkUpdateUnsafeCustodyDate } = useApp();
+  const [isSafeDatePickerOpen, setIsSafeDatePickerOpen] = useState(false);
+  const [isUnsafeDatePickerOpen, setIsUnsafeDatePickerOpen] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -45,7 +50,12 @@ export function BulkEditCocpDateModal({ isOpen, onClose, selectedNumbers }: Bulk
 
   function onSubmit(values: z.infer<typeof formSchema>) {
     const numberIds = selectedNumbers.map(s => s.id);
-    bulkUpdateSafeCustodyDate(numberIds, values.safeCustodyDate);
+    if (values.safeCustodyDate) {
+      bulkUpdateSafeCustodyDate(numberIds, values.safeCustodyDate);
+    }
+    if (values.unsafeCustodyDate) {
+      bulkUpdateUnsafeCustodyDate(numberIds, values.unsafeCustodyDate);
+    }
     onClose();
   }
 
@@ -53,9 +63,9 @@ export function BulkEditCocpDateModal({ isOpen, onClose, selectedNumbers }: Bulk
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Bulk Edit Safe Custody Date</DialogTitle>
+          <DialogTitle>Bulk Edit COCP Custody Dates</DialogTitle>
           <DialogDescription>
-            Update the safe custody date for the selected {selectedNumbers.length} COCP number(s).
+            Update the custody dates for the selected {selectedNumbers.length} COCP number(s).
           </DialogDescription>
         </DialogHeader>
         <div className="py-4 space-y-4">
@@ -76,8 +86,8 @@ export function BulkEditCocpDateModal({ isOpen, onClose, selectedNumbers }: Bulk
                   name="safeCustodyDate"
                   render={({ field }) => (
                     <FormItem className="flex flex-col">
-                      <FormLabel>New Safe Custody Date</FormLabel>
-                      <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                      <FormLabel>New Safe Custody Date (Optional)</FormLabel>
+                      <Popover open={isSafeDatePickerOpen} onOpenChange={setIsSafeDatePickerOpen}>
                         <PopoverTrigger asChild>
                           <FormControl>
                             <Button
@@ -102,7 +112,48 @@ export function BulkEditCocpDateModal({ isOpen, onClose, selectedNumbers }: Bulk
                             selected={field.value}
                             onSelect={(date) => {
                               if (date) field.onChange(date);
-                              setIsDatePickerOpen(false);
+                              setIsSafeDatePickerOpen(false);
+                            }}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="unsafeCustodyDate"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>New Unsafe Custody Date (Optional)</FormLabel>
+                      <Popover open={isUnsafeDatePickerOpen} onOpenChange={setIsUnsafeDatePickerOpen}>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant={"outline"}
+                              className={cn(
+                                "w-full pl-3 text-left font-normal",
+                                !field.value && "text-muted-foreground"
+                              )}
+                            >
+                              {field.value ? (
+                                format(field.value, "PPP")
+                              ) : (
+                                <span>Pick a date</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value}
+                            onSelect={(date) => {
+                              if (date) field.onChange(date);
+                              setIsUnsafeDatePickerOpen(false);
                             }}
                             initialFocus
                           />

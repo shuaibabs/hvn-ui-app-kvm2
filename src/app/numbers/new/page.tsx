@@ -40,6 +40,7 @@ const formSchema = z.object({
   uploadStatus: z.enum(['Pending', 'Done']),
   rtpDate: z.date().optional(),
   safeCustodyDate: z.date().optional(),
+  unsafeCustodyDate: z.date().optional(),
   accountName: z.string().optional(),
   ownershipType: z.enum(['Individual', 'Partnership']),
   partnerName: z.string().optional(),
@@ -55,11 +56,11 @@ const formSchema = z.object({
   path: ['rtpDate'],
 }).refine(data => {
   if (data.numberType === 'COCP') {
-    return !!data.safeCustodyDate;
+    return !!data.safeCustodyDate && !!data.unsafeCustodyDate;
   }
   return true;
 }, {
-  message: 'Safe Custody Date is required for COCP numbers.',
+  message: 'Both Safe and Unsafe Custody Dates are required for COCP numbers.',
   path: ['safeCustodyDate'],
 }).refine(data => {
   if (data.numberType === 'COCP') {
@@ -93,6 +94,7 @@ export default function NewNumberPage() {
   const [isPurchaseDatePickerOpen, setIsPurchaseDatePickerOpen] = useState(false);
   const [isRtpDatePickerOpen, setIsRtpDatePickerOpen] = useState(false);
   const [isSafeCustodyDatePickerOpen, setIsSafeCustodyDatePickerOpen] = useState(false);
+  const [isUnsafeCustodyDatePickerOpen, setIsUnsafeCustodyDatePickerOpen] = useState(false);
   const [isBillDatePickerOpen, setIsBillDatePickerOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [formData, setFormData] = useState<NewNumberData | null>(null);
@@ -442,47 +444,90 @@ export default function NewNumberPage() {
                 />
               </div>
               {numberType === 'COCP' && (
-                <FormField
-                  control={form.control}
-                  name="safeCustodyDate"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-col">
-                      <FormLabel>Safe Custody Date</FormLabel>
-                      <Popover open={isSafeCustodyDatePickerOpen} onOpenChange={setIsSafeCustodyDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                          <FormControl>
-                            <Button
-                              variant={"outline"}
-                              className={cn(
-                                "w-full pl-3 text-left font-normal",
-                                !field.value && "text-muted-foreground"
-                              )}
-                            >
-                              {field.value ? (
-                                format(field.value, "PPP")
-                              ) : (
-                                <span>Pick a date</span>
-                              )}
-                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                            </Button>
-                          </FormControl>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={field.value}
-                            onSelect={(date) => {
-                              if (date) field.onChange(date);
-                              setIsSafeCustodyDatePickerOpen(false);
-                            }}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                    control={form.control}
+                    name="safeCustodyDate"
+                    render={({ field }) => (
+                        <FormItem className="flex flex-col">
+                        <FormLabel>Safe Custody Date</FormLabel>
+                        <Popover open={isSafeCustodyDatePickerOpen} onOpenChange={setIsSafeCustodyDatePickerOpen}>
+                            <PopoverTrigger asChild>
+                            <FormControl>
+                                <Button
+                                variant={"outline"}
+                                className={cn(
+                                    "w-full pl-3 text-left font-normal",
+                                    !field.value && "text-muted-foreground"
+                                )}
+                                >
+                                {field.value ? (
+                                    format(field.value, "PPP")
+                                ) : (
+                                    <span>Pick a date</span>
+                                )}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                </Button>
+                            </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                                mode="single"
+                                selected={field.value}
+                                onSelect={(date) => {
+                                if (date) field.onChange(date);
+                                setIsSafeCustodyDatePickerOpen(false);
+                                }}
+                                initialFocus
+                            />
+                            </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                        </FormItem>
+                    )}
+                    />
+                    <FormField
+                    control={form.control}
+                    name="unsafeCustodyDate"
+                    render={({ field }) => (
+                        <FormItem className="flex flex-col">
+                        <FormLabel>Unsafe Custody Date</FormLabel>
+                        <Popover open={isUnsafeCustodyDatePickerOpen} onOpenChange={setIsUnsafeCustodyDatePickerOpen}>
+                            <PopoverTrigger asChild>
+                            <FormControl>
+                                <Button
+                                variant={"outline"}
+                                className={cn(
+                                    "w-full pl-3 text-left font-normal",
+                                    !field.value && "text-muted-foreground"
+                                )}
+                                >
+                                {field.value ? (
+                                    format(field.value, "PPP")
+                                ) : (
+                                    <span>Pick a date</span>
+                                )}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                </Button>
+                            </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                                mode="single"
+                                selected={field.value}
+                                onSelect={(date) => {
+                                if (date) field.onChange(date);
+                                setIsUnsafeCustodyDatePickerOpen(false);
+                                }}
+                                initialFocus
+                            />
+                            </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                        </FormItem>
+                    )}
+                    />
+                </div>
               )}
               {numberType === 'Postpaid' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

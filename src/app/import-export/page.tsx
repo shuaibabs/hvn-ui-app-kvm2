@@ -32,7 +32,7 @@ const ALL_EXPECTED_HEADERS = [
   'Mobile', 'NumberType', 'PurchaseFrom', 'PurchasePrice', 'PurchaseDate', 
   'CurrentLocation', 'LocationType', 'Status', 'OwnershipType', 'AssignedTo', 
   'SalePrice', 'Notes', 'UploadStatus', 'PartnerName', 'RTPDate', 
-  'SafeCustodyDate', 'AccountName', 'BillDate', 'PDBill'
+  'SafeCustodyDate', 'UnsafeCustodyDate', 'AccountName', 'BillDate', 'PDBill'
 ];
 
 
@@ -71,6 +71,7 @@ export default function ImportExportPage() {
         "PartnerName": n.partnerName || '',
         "RTPDate": n.rtpDate ? format(n.rtpDate.toDate(), 'yyyy-MM-dd') : '',
         "SafeCustodyDate": n.safeCustodyDate ? format(n.safeCustodyDate.toDate(), 'yyyy-MM-dd') : '',
+        "UnsafeCustodyDate": n.unsafeCustodyDate ? format(n.unsafeCustodyDate.toDate(), 'yyyy-MM-dd') : '',
         "AccountName": n.accountName || '',
         "BillDate": n.billDate ? format(n.billDate.toDate(), 'yyyy-MM-dd') : '',
         "PDBill": n.pdBill || 'No',
@@ -295,7 +296,7 @@ export default function ImportExportPage() {
                   <p>AssignedTo (defaults to "Unassigned" if employee not found), SalePrice, Notes, UploadStatus (Pending|Done), PartnerName (required if OwnershipType is "Partnership")</p>
                   <p className="font-semibold mt-2">Conditional Fields:</p>
                   <p><strong>For Non-RTP Status:</strong> RTPDate (dd-MM-yy format, required) - <em className="text-amber-600">Number will automatically become RTP when this date is reached</em></p>
-                  <p><strong>For COCP Type:</strong> SafeCustodyDate (dd-MM-yy format, required), AccountName (required)</p>
+                  <p><strong>For COCP Type:</strong> SafeCustodyDate (dd-MM-yy format, required), UnsafeCustodyDate (dd-MM-yy format, required), AccountName (required)</p>
                   <p><strong>For Postpaid Type:</strong> BillDate (dd-MM-yy format, required), PDBill (Yes|No, defaults to No)</p>
                   <p className="font-semibold mt-2">Date Format:</p>
                   <p>Recommended format: <code className="bg-muted px-1 rounded">dd-MM-yy</code> (e.g., 15-03-26 for March 15, 2026)</p>

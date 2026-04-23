@@ -39,6 +39,7 @@ const formSchema = z.object({
   uploadStatus: z.enum(['Pending', 'Done']),
   rtpDate: z.date().optional(),
   safeCustodyDate: z.date().optional(),
+  unsafeCustodyDate: z.date().optional(),
   accountName: z.string().optional(),
   ownershipType: z.enum(['Individual', 'Partnership']),
   partnerName: z.string().optional(),
@@ -49,9 +50,9 @@ const formSchema = z.object({
   return true;
 }, { message: 'RTP Date is required for Non-RTP status.', path: ['rtpDate'] })
   .refine(data => {
-    if (data.numberType === 'COCP') return !!data.safeCustodyDate;
+    if (data.numberType === 'COCP') return !!data.safeCustodyDate && !!data.unsafeCustodyDate;
     return true;
-  }, { message: 'Safe Custody Date is required for COCP numbers.', path: ['safeCustodyDate'] })
+  }, { message: 'Both Safe and Unsafe Custody Dates are required for COCP numbers.', path: ['safeCustodyDate'] })
   .refine(data => {
     if (data.numberType === 'COCP') return !!data.accountName && data.accountName.length > 0;
     return true;
@@ -75,6 +76,7 @@ export default function EditNumberPage() {
   const [isPurchaseDatePickerOpen, setIsPurchaseDatePickerOpen] = useState(false);
   const [isRtpDatePickerOpen, setIsRtpDatePickerOpen] = useState(false);
   const [isSafeCustodyDatePickerOpen, setIsSafeCustodyDatePickerOpen] = useState(false);
+  const [isUnsafeCustodyDatePickerOpen, setIsUnsafeCustodyDatePickerOpen] = useState(false);
   const [isBillDatePickerOpen, setIsBillDatePickerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [number, setNumber] = useState<NumberRecord | undefined>(undefined);
@@ -92,6 +94,7 @@ export default function EditNumberPage() {
         purchaseDate: foundNumber.purchaseDate?.toDate(),
         rtpDate: foundNumber.rtpDate?.toDate(),
         safeCustodyDate: foundNumber.safeCustodyDate?.toDate(),
+        unsafeCustodyDate: foundNumber.unsafeCustodyDate?.toDate(),
         billDate: foundNumber.billDate?.toDate(),
         salePrice: foundNumber.salePrice ? Number(foundNumber.salePrice) : undefined,
       });
@@ -302,25 +305,46 @@ export default function EditNumberPage() {
                 )} />
               </div>
               {numberType === 'COCP' && (
-                <FormField control={form.control} name="safeCustodyDate" render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Safe Custody Date</FormLabel>
-                    <Popover open={isSafeCustodyDatePickerOpen} onOpenChange={setIsSafeCustodyDatePickerOpen}>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
-                            {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={field.value} onSelect={(date) => { if (date) field.onChange(date); setIsSafeCustodyDatePickerOpen(false); }} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField control={form.control} name="safeCustodyDate" render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                        <FormLabel>Safe Custody Date</FormLabel>
+                        <Popover open={isSafeCustodyDatePickerOpen} onOpenChange={setIsSafeCustodyDatePickerOpen}>
+                        <PopoverTrigger asChild>
+                            <FormControl>
+                            <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                            </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar mode="single" selected={field.value} onSelect={(date) => { if (date) field.onChange(date); setIsSafeCustodyDatePickerOpen(false); }} initialFocus />
+                        </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                    </FormItem>
+                    )} />
+                    <FormField control={form.control} name="unsafeCustodyDate" render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                        <FormLabel>Unsafe Custody Date</FormLabel>
+                        <Popover open={isUnsafeCustodyDatePickerOpen} onOpenChange={setIsUnsafeCustodyDatePickerOpen}>
+                        <PopoverTrigger asChild>
+                            <FormControl>
+                            <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                            </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar mode="single" selected={field.value} onSelect={(date) => { if (date) field.onChange(date); setIsUnsafeCustodyDatePickerOpen(false); }} initialFocus />
+                        </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                    </FormItem>
+                    )} />
+                </div>
               )}
               {numberType === 'Postpaid' && (
                 <FormField

@@ -30,12 +30,13 @@ type ReviewResult = {
 };
 
 export function BulkChangeCocpDateModal({ isOpen, onClose }: BulkChangeCocpDateModalProps) {
-  const { numbers, bulkUpdateSafeCustodyDate } = useApp();
+  const { numbers, bulkUpdateSafeCustodyDate, bulkUpdateUnsafeCustodyDate } = useApp();
   const [inputText, setInputText] = useState('');
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [newDate, setNewDate] = useState<Date | undefined>(undefined);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [updateField, setUpdateField] = useState<'safe' | 'unsafe'>('safe');
 
 
   const handleReview = () => {
@@ -73,7 +74,11 @@ export function BulkChangeCocpDateModal({ isOpen, onClose }: BulkChangeCocpDateM
     if (!reviewResult || reviewResult.found.length === 0 || !newDate) return;
     setIsUpdating(true);
     const idsToUpdate = reviewResult.found.map(n => n.id);
-    bulkUpdateSafeCustodyDate(idsToUpdate, newDate);
+    if (updateField === 'safe') {
+      bulkUpdateSafeCustodyDate(idsToUpdate, newDate);
+    } else {
+      bulkUpdateUnsafeCustodyDate(idsToUpdate, newDate);
+    }
     setIsUpdating(false);
     handleClose();
   };
@@ -103,9 +108,9 @@ export function BulkChangeCocpDateModal({ isOpen, onClose }: BulkChangeCocpDateM
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Bulk Change Safe Custody Date</DialogTitle>
+          <DialogTitle>Bulk Change COCP Dates</DialogTitle>
           <DialogDescription>
-            Paste COCP numbers to change their Safe Custody Date.
+            Paste COCP numbers to change their Safe or Unsafe Custody Date.
           </DialogDescription>
         </DialogHeader>
         
@@ -133,33 +138,61 @@ export function BulkChangeCocpDateModal({ isOpen, onClose }: BulkChangeCocpDateM
                     {renderList(reviewResult.notCocp, "Numbers Found (but not COCP)", "outline")}
                     {renderList(reviewResult.duplicates, "Duplicate Numbers Ignored", "outline")}
                 </div>
-                 <div className="space-y-2">
-                    <Label htmlFor="new-date">New Safe Custody Date</Label>
-                     <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                            <Button
-                            variant={"outline"}
-                            className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !newDate && "text-muted-foreground"
-                            )}
-                            >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {newDate ? format(newDate, "PPP") : <span>Pick a date</span>}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                            <Calendar
-                            mode="single"
-                            selected={newDate}
-                            onSelect={(date) => {
-                                setNewDate(date);
-                                setIsDatePickerOpen(false);
-                            }}
-                            initialFocus
-                            />
-                        </PopoverContent>
-                    </Popover>
+                 <div className="space-y-3">
+                    <div className="space-y-2">
+                        <Label>Select Date to Update</Label>
+                        <div className="flex gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    name="updateField" 
+                                    value="safe" 
+                                    checked={updateField === 'safe'} 
+                                    onChange={() => setUpdateField('safe')} 
+                                />
+                                <span className="text-sm">Safe Custody</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    name="updateField" 
+                                    value="unsafe" 
+                                    checked={updateField === 'unsafe'} 
+                                    onChange={() => setUpdateField('unsafe')} 
+                                />
+                                <span className="text-sm">Unsafe Custody</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="new-date">New {updateField === 'safe' ? 'Safe' : 'Unsafe'} Custody Date</Label>
+                        <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                variant={"outline"}
+                                className={cn(
+                                    "w-full justify-start text-left font-normal",
+                                    !newDate && "text-muted-foreground"
+                                )}
+                                >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {newDate ? format(newDate, "PPP") : <span>Pick a date</span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0">
+                                <Calendar
+                                mode="single"
+                                selected={newDate}
+                                onSelect={(date) => {
+                                    setNewDate(date);
+                                    setIsDatePickerOpen(false);
+                                }}
+                                initialFocus
+                                />
+                            </PopoverContent>
+                        </Popover>
+                    </div>
                  </div>
             </div>
         )}

@@ -143,6 +143,9 @@ export default function AllNumbersPage() {
           if (Math.max(...Object.values(digitCounts)) > parseInt(maxContain, 10)) return false;
         }
 
+        if (advancedSearch.minPrice && Number(num.salePrice) < Number(advancedSearch.minPrice)) return false;
+        if (advancedSearch.maxPrice && Number(num.salePrice) > Number(advancedSearch.maxPrice)) return false;
+
         return true;
       });
     }

@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 
 const formSchema = z.object({
   safeCustodyDate: z.date({ required_error: 'Safe custody date is required.' }),
+  unsafeCustodyDate: z.date({ required_error: 'Unsafe custody date is required.' }),
 });
 
 type EditCocpDateModalProps = {
@@ -27,8 +28,9 @@ type EditCocpDateModalProps = {
 };
 
 export function EditCocpDateModal({ isOpen, onClose, number }: EditCocpDateModalProps) {
-  const { updateSafeCustodyDate } = useApp();
-  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const { updateSafeCustodyDate, updateUnsafeCustodyDate } = useApp();
+  const [isSafeDatePickerOpen, setIsSafeDatePickerOpen] = useState(false);
+  const [isUnsafeDatePickerOpen, setIsUnsafeDatePickerOpen] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -38,12 +40,14 @@ export function EditCocpDateModal({ isOpen, onClose, number }: EditCocpDateModal
     if (number) {
       form.reset({
         safeCustodyDate: number.safeCustodyDate ? number.safeCustodyDate.toDate() : new Date(),
+        unsafeCustodyDate: number.unsafeCustodyDate ? number.unsafeCustodyDate.toDate() : new Date(),
       });
     }
   }, [number, form]);
 
   function onSubmit(values: z.infer<typeof formSchema>) {
     updateSafeCustodyDate(number.id, values.safeCustodyDate);
+    updateUnsafeCustodyDate(number.id, values.unsafeCustodyDate);
     onClose();
   }
 
@@ -56,9 +60,9 @@ export function EditCocpDateModal({ isOpen, onClose, number }: EditCocpDateModal
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Safe Custody Date</DialogTitle>
+          <DialogTitle>Edit COCP Custody Dates</DialogTitle>
           <DialogDescription>
-            Update the safe custody date for COCP number <span className="font-semibold">{number.mobile}</span>.
+            Update the custody dates for COCP number <span className="font-semibold">{number.mobile}</span>.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -69,7 +73,7 @@ export function EditCocpDateModal({ isOpen, onClose, number }: EditCocpDateModal
               render={({ field }) => (
                 <FormItem className="flex flex-col">
                   <FormLabel>Safe Custody Date</FormLabel>
-                  <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                  <Popover open={isSafeDatePickerOpen} onOpenChange={setIsSafeDatePickerOpen}>
                     <PopoverTrigger asChild>
                       <FormControl>
                         <Button
@@ -94,7 +98,48 @@ export function EditCocpDateModal({ isOpen, onClose, number }: EditCocpDateModal
                         selected={field.value}
                         onSelect={(date) => {
                           field.onChange(date);
-                          setIsDatePickerOpen(false);
+                          setIsSafeDatePickerOpen(false);
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="unsafeCustodyDate"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel>Unsafe Custody Date</FormLabel>
+                  <Popover open={isUnsafeDatePickerOpen} onOpenChange={setIsUnsafeDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant={"outline"}
+                          className={cn(
+                            "w-full pl-3 text-left font-normal",
+                            !field.value && "text-muted-foreground"
+                          )}
+                        >
+                          {field.value ? (
+                            format(field.value, "PPP")
+                          ) : (
+                            <span>Pick a date</span>
+                          )}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value}
+                        onSelect={(date) => {
+                          field.onChange(date);
+                          setIsUnsafeDatePickerOpen(false);
                         }}
                         initialFocus
                       />

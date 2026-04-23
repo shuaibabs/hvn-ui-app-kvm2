@@ -164,6 +164,8 @@ type AppContextType = {
   bulkUpdatePostpaidDetails: (numberIds: string[], details: { billDate: Date, pdBill: 'Yes' | 'No' }) => void;
   bulkMarkRemindersDone: (reminderIds: string[], note?: string) => void;
   bulkDeleteReminders: (reminderIds: string[]) => void;
+  updateUnsafeCustodyDate: (numberId: string, newDate: Date) => void;
+  bulkUpdateUnsafeCustodyDate: (numberIds: string[], newDate: Date) => void;
   addSalesVendor: (vendorName: string) => Promise<void>;
   updateSalesVendor: (id: string, newName: string) => Promise<void>;
   deleteSalesVendor: (id: string) => Promise<void>;
@@ -918,6 +920,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       purchaseDate: Timestamp.fromDate(data.purchaseDate),
       rtpDate: data.rtpDate ? Timestamp.fromDate(data.rtpDate) : null,
       safeCustodyDate: data.safeCustodyDate ? Timestamp.fromDate(data.safeCustodyDate) : null,
+      unsafeCustodyDate: data.unsafeCustodyDate ? Timestamp.fromDate(data.unsafeCustodyDate) : null,
       billDate: data.billDate ? Timestamp.fromDate(data.billDate) : null,
       salePrice: data.salePrice || 0,
     };
@@ -1332,6 +1335,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sum: calculateDigitalRoot(data.mobile),
       rtpDate: data.status === 'Non-RTP' && data.rtpDate ? Timestamp.fromDate(data.rtpDate) : null,
       safeCustodyDate: data.numberType === 'COCP' && data.safeCustodyDate ? Timestamp.fromDate(data.safeCustodyDate) : null,
+      unsafeCustodyDate: data.numberType === 'COCP' && data.unsafeCustodyDate ? Timestamp.fromDate(data.unsafeCustodyDate) : null,
       billDate: data.numberType === 'Postpaid' && data.billDate ? Timestamp.fromDate(data.billDate) : null,
       assignedTo: data.assignedTo || 'Unassigned',
       name: data.assignedTo || 'Unassigned',
@@ -1352,6 +1356,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else {
       delete (newNumber as any).accountName;
       delete (newNumber as any).safeCustodyDate;
+      delete (newNumber as any).unsafeCustodyDate;
     }
 
     if (data.numberType !== 'Postpaid') {
@@ -1398,6 +1403,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sum: calculateDigitalRoot(mobile),
         rtpDate: data.status === 'Non-RTP' && data.rtpDate ? Timestamp.fromDate(data.rtpDate) : null,
         safeCustodyDate: data.numberType === 'COCP' && data.safeCustodyDate ? Timestamp.fromDate(data.safeCustodyDate) : null,
+        unsafeCustodyDate: data.numberType === 'COCP' && data.unsafeCustodyDate ? Timestamp.fromDate(data.unsafeCustodyDate) : null,
         billDate: data.numberType === 'Postpaid' && data.billDate ? Timestamp.fromDate(data.billDate) : null,
         assignedTo: data.assignedTo || 'Unassigned',
         name: data.assignedTo || 'Unassigned',
@@ -1411,6 +1417,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data.numberType !== 'COCP') {
         delete (newNumber as any).accountName;
         delete (newNumber as any).safeCustodyDate;
+        delete (newNumber as any).unsafeCustodyDate;
       }
       if (data.numberType !== 'Postpaid') {
         delete (newNumber as any).billDate;
@@ -1589,6 +1596,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
         path: 'numbers',
         operation: 'update',
         requestResourceData: { info: `Bulk update of Safe Custody Date for ${numberIds.length} records` },
+      });
+      errorEmitter.emit('permission-error', permissionError);
+    });
+  };
+
+  const updateUnsafeCustodyDate = (numberId: string, newDate: Date) => {
+    if (!db || !user) return;
+    const num = numbers.find(n => n.id === numberId);
+    if (!num) return;
+
+    const performedBy = user.displayName || user.email || 'User';
+    const historyEvent = createLifecycleEvent('COCP Date Changed', `Unsafe Custody Date changed to ${newDate.toLocaleDateString()}.`, performedBy);
+    const numDocRef = doc(db, 'numbers', numberId);
+    const updateData = { unsafeCustodyDate: Timestamp.fromDate(newDate) };
+
+    updateDoc(numDocRef, { ...updateData, history: arrayUnion(historyEvent) }).then(() => {
+      addActivity({
+        employeeName: performedBy,
+        action: 'Updated Unsafe Custody Date',
+        description: `Updated Unsafe Custody Date for ${num.mobile} to ${newDate.toLocaleDateString()}`
+      });
+    }).catch(async (serverError) => {
+      const permissionError = new FirestorePermissionError({
+        path: numDocRef.path,
+        operation: 'update',
+        requestResourceData: updateData,
+      });
+      errorEmitter.emit('permission-error', permissionError);
+    });
+  };
+
+  const bulkUpdateUnsafeCustodyDate = (numberIds: string[], newDate: Date) => {
+    if (!db || !user) return;
+    const batch = writeBatch(db);
+    const performedBy = user.displayName || user.email || 'User';
+    const historyEvent = createLifecycleEvent('COCP Date Changed', `Unsafe Custody Date changed to ${newDate.toLocaleDateString()}.`, performedBy);
+    const updateData = { unsafeCustodyDate: Timestamp.fromDate(newDate) };
+    const affectedNumbers = numbers.filter(n => numberIds.includes(n.id)).map(n => n.mobile);
+
+    numberIds.forEach(id => {
+      const docRef = doc(db, 'numbers', id);
+      batch.update(docRef, { ...updateData, history: arrayUnion(historyEvent) });
+    });
+    batch.commit().then(() => {
+      addActivity({
+        employeeName: performedBy,
+        action: 'Bulk Updated Unsafe Custody Date',
+        description: createDetailedDescription(`Updated Unsafe Custody Date to ${newDate.toLocaleDateString()} for`, affectedNumbers)
+      });
+      toast({
+        title: "Update Successful",
+        description: `Updated Unsafe Custody Date for ${numberIds.length} record(s).`
+      });
+    }).catch(async (serverError) => {
+      const permissionError = new FirestorePermissionError({
+        path: 'numbers',
+        operation: 'update',
+        requestResourceData: { info: `Bulk update of Unsafe Custody Date for ${numberIds.length} records` },
       });
       errorEmitter.emit('permission-error', permissionError);
     });
@@ -2170,6 +2235,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           failedRecords.push({ record, reason: 'Missing AccountName (required for COCP).' });
           continue;
         }
+
+        const unsafeCustodyDate = parseDate(record.UnsafeCustodyDate);
+        if (!unsafeCustodyDate) {
+          failedRecords.push({ record, reason: 'Invalid or missing UnsafeCustodyDate (required for COCP). Expected format: dd-MM-yyyy or similar.' });
+          continue;
+        }
       }
 
       // Validate Postpaid specific fields
@@ -2239,6 +2310,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (numberType === 'COCP') {
         const safeCustodyDate = parseDate(record.SafeCustodyDate);
         recordData.safeCustodyDate = safeCustodyDate ? Timestamp.fromDate(safeCustodyDate) : null;
+        const unsafeCustodyDate = parseDate(record.UnsafeCustodyDate);
+        recordData.unsafeCustodyDate = unsafeCustodyDate ? Timestamp.fromDate(unsafeCustodyDate) : null;
         recordData.accountName = record.AccountName?.toString().trim() || '';
       }
 
@@ -2689,6 +2762,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     bulkUpdatePostpaidDetails,
     bulkMarkRemindersDone,
     bulkDeleteReminders,
+    updateUnsafeCustodyDate,
+    bulkUpdateUnsafeCustodyDate,
     addSalesVendor,
     updateSalesVendor,
     deleteSalesVendor,
