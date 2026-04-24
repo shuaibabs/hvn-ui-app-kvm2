@@ -58,6 +58,8 @@ export function SaleDetailsModal({ isOpen, onClose, sale }: SaleDetailsModalProp
                 <h4 className="font-medium text-sm text-primary">Sale Details</h4>
                 <DetailItem label="Sold To" value={sale.soldTo} />
                 <DetailItem label="Sale Price" value={`₹${salePrice.toLocaleString()}`} />
+                <DetailItem label="Remark" value={sale.remark || '-'} />
+                <DetailItem label="Reason of Sales" value={sale.saleReason || '-'} />
             </div>
             <Separator />
              <DetailItem 

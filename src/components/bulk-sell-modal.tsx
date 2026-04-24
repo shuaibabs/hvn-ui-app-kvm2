@@ -25,6 +25,8 @@ const formSchema = z.object({
   salePrice: z.coerce.number().min(0, "Sale price can't be negative."),
   soldTo: z.string().min(1, 'Sold to is required.'),
   saleDate: z.date({ required_error: 'Sale date is required.' }),
+  remark: z.string().optional(),
+  saleReason: z.string().optional(),
 });
 
 type BulkSellNumberModalProps = {
@@ -48,6 +50,8 @@ export function BulkSellNumberModal({ isOpen, onClose, selectedNumbers, isPreBoo
       salePrice: 0,
       soldTo: '',
       saleDate: new Date(),
+      remark: '',
+      saleReason: '',
     },
   });
 
@@ -64,6 +68,8 @@ export function BulkSellNumberModal({ isOpen, onClose, selectedNumbers, isPreBoo
         salePrice: 0,
         soldTo: '',
         saleDate: new Date(),
+        remark: '',
+        saleReason: '',
       });
     }
   }, [isOpen, form]);
@@ -171,6 +177,32 @@ export function BulkSellNumberModal({ isOpen, onClose, selectedNumbers, isPreBoo
                         />
                       </PopoverContent>
                     </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="remark"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Remark (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Enter any notes or remarks..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="saleReason"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Reason of Sales (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Enter reason for sale..." {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

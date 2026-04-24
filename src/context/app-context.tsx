@@ -22,6 +22,8 @@ import {
   DeletedNumberRecord,
   SalesVendorRecord,
   DealerRecord,
+  DealerSaleRecord,
+  DealerDeleteRecord,
 } from '@/lib/data';
 import { useToast } from '@/hooks/use-toast';
 import { isToday, isPast, isValid, parse, subDays } from 'date-fns';
@@ -117,6 +119,8 @@ type AppContextType = {
   vendors: string[]; // Keep for comboboxes
   salesVendors: SalesVendorRecord[]; // Full records for management page
   dealerPurchases: DealerPurchaseRecord[];
+  dealerSales: DealerSaleRecord[];
+  dealerDeletes: DealerDeleteRecord[];
   preBookings: PreBookingRecord[];
   globalHistory: GlobalHistoryRecord[];
   deletedNumbers: DeletedNumberRecord[];
@@ -136,8 +140,8 @@ type AppContextType = {
   addActivity: (activity: Omit<Activity, 'id' | 'srNo' | 'timestamp' | 'createdBy' | 'source' | 'groupName'>, showToast?: boolean) => void;
   assignNumbersToEmployee: (numberIds: string[], employeeName: string, location: { locationType: 'Store' | 'Employee' | 'Dealer'; currentLocation: string; }) => void;
   checkInNumber: (id: string) => void;
-  sellNumber: (id: string, details: { salePrice: number; soldTo: string; saleDate: Date }) => void;
-  bulkSellNumbers: (numbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; }) => void;
+  sellNumber: (id: string, details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => void;
+  bulkSellNumbers: (numbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => void;
   cancelSale: (saleId: string) => void;
   addNumber: (data: NewNumberData) => void;
   addMultipleNumbers: (data: NewNumberData, validNumbers: string[]) => Promise<void>;
@@ -146,7 +150,8 @@ type AppContextType = {
   addReminder: (data: NewReminderData, showToast?: boolean) => Promise<void>;
   deleteReminder: (id: string) => void;
   assignRemindersToUsers: (reminderIds: string[], userNames: string[]) => void;
-  deleteDealerPurchases: (records: DealerPurchaseRecord[]) => void;
+  deleteDealerPurchases: (records: DealerPurchaseRecord[], reason?: string) => void;
+  markDealerPurchasesAsSold: (records: DealerPurchaseRecord[], salePrice: number) => void;
   deleteActivities: (activityIds: string[]) => void;
   updateSafeCustodyDate: (numberId: string, newDate: Date) => void;
   bulkUpdateSafeCustodyDate: (numberIds: string[], newDate: Date) => void;
@@ -156,8 +161,8 @@ type AppContextType = {
   updateNumberLocation: (numberIds: string[], location: { locationType: 'Store' | 'Employee' | 'Dealer', currentLocation: string }) => void;
   markAsPreBooked: (numberIds: string[]) => void;
   cancelPreBooking: (preBookingId: string) => void;
-  sellPreBookedNumber: (preBookingId: string, details: { salePrice: number; soldTo: string; saleDate: Date }) => void;
-  bulkSellPreBookedNumbers: (preBookedNumbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; }) => void;
+  sellPreBookedNumber: (preBookingId: string, details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => void;
+  bulkSellPreBookedNumbers: (preBookedNumbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => void;
   addSalesPayment: (data: NewPaymentData) => void;
   addDealerPayment: (data: NewPaymentData) => void;
   updatePostpaidDetails: (id: string, details: { billDate: Date, pdBill: 'Yes' | 'No' }) => void;
@@ -177,6 +182,10 @@ type AppContextType = {
   dealerPayments: PaymentRecord[];
   salesPaymentsLoading: boolean;
   dealerPaymentsLoading: boolean;
+  dealerSalesLoading: boolean;
+  dealerDeletesLoading: boolean;
+  bulkUpdateUpcStatus: (saleIds: string[], upcStatus: 'Pending' | 'Generated') => void;
+  updateSaleStatuses: (saleId: string, values: { paymentStatus: 'Pending' | 'Done' }) => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -191,6 +200,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [dealerPurchases, setDealerPurchases] = useState<DealerPurchaseRecord[]>([]);
+  const [dealerSales, setDealerSales] = useState<DealerSaleRecord[]>([]);
+  const [dealerDeletes, setDealerDeletes] = useState<DealerDeleteRecord[]>([]);
   const [preBookings, setPreBookings] = useState<PreBookingRecord[]>([]);
   const [deletedNumbers, setDeletedNumbers] = useState<DeletedNumberRecord[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -213,6 +224,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [remindersLoading, setRemindersLoading] = useState(true);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
   const [dealerPurchasesLoading, setDealerPurchasesLoading] = useState(true);
+  const [dealerSalesLoading, setDealerSalesLoading] = useState(true);
+  const [dealerDeletesLoading, setDealerDeletesLoading] = useState(true);
   const [preBookingsLoading, setPreBookingsLoading] = useState(true);
   const [deletedNumbersLoading, setDeletedNumbersLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(true);
@@ -230,6 +243,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       remindersLoading ||
       activitiesLoading ||
       dealerPurchasesLoading ||
+      dealerSalesLoading ||
+      dealerDeletesLoading ||
       preBookingsLoading ||
       deletedNumbersLoading ||
       usersLoading ||
@@ -441,6 +456,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setReminders([]);
       setActivities([]);
       setDealerPurchases([]);
+      setDealerSales([]);
+      setDealerDeletes([]);
       setPreBookings([]);
       setDeletedNumbers([]);
       setUsers([]);
@@ -453,6 +470,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setRemindersLoading(false);
       setActivitiesLoading(false);
       setDealerPurchasesLoading(false);
+      setDealerSalesLoading(false);
+      setDealerDeletesLoading(false);
       setPreBookingsLoading(false);
       setDeletedNumbersLoading(false);
       setUsersLoading(false);
@@ -484,6 +503,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       { name: 'reminders', setter: setReminders, loader: setRemindersLoading },
       { name: 'activities', setter: setActivities, loader: setActivitiesLoading },
       { name: 'dealerPurchases', setter: setDealerPurchases, loader: setDealerPurchasesLoading },
+      { name: 'dealerSales', setter: setDealerSales, loader: setDealerSalesLoading },
+      { name: 'dealerDeletes', setter: setDealerDeletes, loader: setDealerDeletesLoading },
       { name: 'prebookings', setter: setPreBookings, loader: setPreBookingsLoading },
       {
         name: 'users', setter: (data: User[]) => {
@@ -529,6 +550,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           q = query(collectionRef, where("assignedTo", "array-contains", profile.displayName));
         } else if (name === 'dealerPurchases') {
           q = query(collectionRef, where("createdBy", "==", user.uid));
+        } else if (name === 'dealerSales') {
+          q = query(collectionRef, where("createdBy", "==", user.uid));
+        } else if (name === 'dealerDeletes') {
+          q = query(collectionRef, where("deletedBy", "==", user.displayName || user.email));
         } else if (name === 'salesPayments') {
           q = query(collectionRef, where("createdBy", "==", user.uid));
         } else if (name === 'dealerPayments') {
@@ -565,6 +590,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const filteredSalesPayments = useMemo(() => salesPayments, [salesPayments]);
   const filteredDealerPayments = useMemo(() => dealerPayments, [dealerPayments]);
   const filteredDealerPurchases = useMemo(() => dealerPurchases, [dealerPurchases]);
+  const filteredDealerSales = useMemo(() => dealerSales, [dealerSales]);
+  const filteredDealerDeletes = useMemo(() => dealerDeletes, [dealerDeletes]);
   const filteredActivities = useMemo(() => activities, [activities]);
 
   // Derive globalHistory from filtered data to ensure consistent visibility
@@ -1166,7 +1193,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const sellNumber = (id: string, details: { salePrice: number; soldTo: string; saleDate: Date }) => {
+  const sellNumber = (id: string, details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => {
     if (!db || !user) return;
     const soldNumber = numbers.find(n => n.id === id);
     if (!soldNumber) return;
@@ -1190,6 +1217,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saleDate: Timestamp.fromDate(details.saleDate),
       createdBy: user.uid,
       originalNumberData: sanitizedOriginalData,
+      remark: details.remark || '',
+      saleReason: details.saleReason || '',
     };
 
     const batch = writeBatch(db);
@@ -1211,7 +1240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const bulkSellNumbers = (numbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; }) => {
+  const bulkSellNumbers = (numbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => {
     if (!db || !user) return;
     if (numbersToSell.length === 0) return;
 
@@ -1237,6 +1266,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         saleDate: Timestamp.fromDate(details.saleDate),
         createdBy: user.uid,
         originalNumberData: sanitizedOriginalData,
+        remark: details.remark || '',
+        saleReason: details.saleReason || '',
       };
 
       batch.set(doc(collection(db, 'sales')), newSale);
@@ -1486,27 +1517,91 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const deleteDealerPurchases = (recordsToDelete: DealerPurchaseRecord[]) => {
+  const deleteDealerPurchases = (recordsToDelete: DealerPurchaseRecord[], reason: string = 'Manual Deletion') => {
     if (!db || !user) return;
 
     const idsToDelete = recordsToDelete.map(r => r.id);
     const affectedNumbers = recordsToDelete.map(r => r.mobile);
     const batch = writeBatch(db);
-    idsToDelete.forEach(id => {
-      batch.delete(doc(db, 'dealerPurchases', id));
+    const performedBy = user.displayName || user.email || 'User';
+
+    recordsToDelete.forEach(record => {
+      const deleteRecord: Omit<DealerDeleteRecord, 'id'> = {
+        srNo: record.srNo,
+        mobile: record.mobile,
+        sum: record.sum,
+        dealerName: record.dealerName,
+        purchasePrice: record.price,
+        deletedAt: Timestamp.now(),
+        deletedBy: performedBy,
+        reason: reason,
+        stockType: record.stockType || 'Basic'
+      };
+      
+      batch.set(doc(collection(db, 'dealerDeletes')), deleteRecord);
+      batch.delete(doc(db, 'dealerPurchases', record.id));
     });
 
     batch.commit().then(() => {
       addActivity({
-        employeeName: user.displayName || user.email || 'User',
+        employeeName: performedBy,
         action: 'Deleted Dealer Purchases',
-        description: createDetailedDescription('Deleted from dealer purchases:', affectedNumbers)
+        description: `Reason: ${reason}. ${createDetailedDescription('Moved to Dealer Deletes:', affectedNumbers)}`
+      });
+      toast({
+        title: "Records Deleted",
+        description: `${recordsToDelete.length} record(s) moved to Dealer Deletes.`
       });
     }).catch(async (serverError) => {
       const permissionError = new FirestorePermissionError({
-        path: 'dealerPurchases',
-        operation: 'delete',
-        requestResourceData: { info: `Batch delete ${idsToDelete.length} records` },
+        path: 'dealerPurchases/dealerDeletes',
+        operation: 'write',
+        requestResourceData: { info: `Batch move to deletes ${idsToDelete.length} records` },
+      });
+      errorEmitter.emit('permission-error', permissionError);
+    });
+  };
+
+  const markDealerPurchasesAsSold = (recordsToSell: DealerPurchaseRecord[], salePrice: number) => {
+    if (!db || !user) return;
+
+    const affectedNumbers = recordsToSell.map(r => r.mobile);
+    const batch = writeBatch(db);
+    const performedBy = user.displayName || user.email || 'User';
+
+    recordsToSell.forEach(record => {
+      const saleRecord: Omit<DealerSaleRecord, 'id'> = {
+        srNo: record.srNo,
+        mobile: record.mobile,
+        sum: record.sum,
+        dealerName: record.dealerName,
+        purchasePrice: record.price,
+        salePrice: salePrice,
+        saleDate: Timestamp.now(),
+        stockType: record.stockType || 'Basic',
+        createdBy: record.createdBy,
+        performedBy: performedBy
+      };
+      
+      batch.set(doc(collection(db, 'dealerSales')), saleRecord);
+      batch.delete(doc(db, 'dealerPurchases', record.id));
+    });
+
+    batch.commit().then(() => {
+      addActivity({
+        employeeName: performedBy,
+        action: 'Sold Dealer Purchases',
+        description: `Sold at ₹${salePrice}. ${createDetailedDescription('Moved to Dealer Sales:', affectedNumbers)}`
+      });
+      toast({
+        title: "Records Sold",
+        description: `${recordsToSell.length} record(s) moved to Dealer Sales.`
+      });
+    }).catch(async (serverError) => {
+      const permissionError = new FirestorePermissionError({
+        path: 'dealerPurchases/dealerSales',
+        operation: 'write',
+        requestResourceData: { info: `Batch move to sales ${recordsToSell.length} records` },
       });
       errorEmitter.emit('permission-error', permissionError);
     });
@@ -1963,7 +2058,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const sellPreBookedNumber = (preBookingId: string, details: { salePrice: number; soldTo: string; saleDate: Date; }) => {
+  const sellPreBookedNumber = (preBookingId: string, details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => {
     if (!db || !user) return;
     const preBookingToSell = preBookings.find(pb => pb.id === preBookingId);
     if (!preBookingToSell || !preBookingToSell.originalNumberData) {
@@ -1986,6 +2081,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saleDate: Timestamp.fromDate(details.saleDate),
       createdBy: user.uid,
       originalNumberData: sanitizeObjectForFirestore({ ...preBookingToSell.originalNumberData, history }),
+      remark: details.remark || '',
+      saleReason: details.saleReason || '',
     };
 
     const batch = writeBatch(db);
@@ -2008,7 +2105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const bulkSellPreBookedNumbers = (preBookedNumbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; }) => {
+  const bulkSellPreBookedNumbers = (preBookedNumbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => {
     if (!db || !user || preBookedNumbersToSell.length === 0) return;
 
     let currentSaleSrNo = getNextSrNo(sales);
@@ -2033,6 +2130,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         saleDate: Timestamp.fromDate(details.saleDate),
         createdBy: user.uid,
         originalNumberData: sanitizeObjectForFirestore({ ...preBookingToSell.originalNumberData, history }),
+        remark: details.remark || '',
+        saleReason: details.saleReason || '',
       };
 
       batch.set(doc(collection(db, 'sales')), newSale);
@@ -2694,6 +2793,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const bulkUpdateUpcStatus = (saleIds: string[], upcStatus: 'Pending' | 'Generated') => {
+    if (!db || !user) return;
+    const batch = writeBatch(db);
+    const performedBy = user.displayName || user.email || 'User';
+
+    saleIds.forEach(id => {
+      const docRef = doc(db, 'sales', id);
+      batch.update(docRef, { upcStatus });
+    });
+
+    batch.commit().then(() => {
+      toast({
+        title: "UPC Status Updated",
+        description: `Successfully updated UPC status for ${saleIds.length} sale(s).`
+      });
+      addActivity({
+        employeeName: performedBy,
+        action: 'Bulk Updated UPC Status',
+        description: `Updated UPC status to ${upcStatus} for ${saleIds.length} record(s).`
+      });
+    }).catch(async (serverError) => {
+      const permissionError = new FirestorePermissionError({
+        path: 'sales',
+        operation: 'update',
+        requestResourceData: { info: `Bulk update UPC status for ${saleIds.length} sales` },
+      });
+      errorEmitter.emit('permission-error', permissionError);
+    });
+  };
+
+  const updateSaleStatuses = (saleId: string, values: { paymentStatus: 'Pending' | 'Done' }) => {
+    if (!db || !user) return;
+    const docRef = doc(db, 'sales', saleId);
+    const sale = sales.find(s => s.id === saleId);
+    const performedBy = user.displayName || user.email || 'User';
+
+    updateDoc(docRef, values).then(() => {
+      toast({
+        title: "Sale Status Updated",
+        description: "Successfully updated payment status."
+      });
+      addActivity({
+        employeeName: performedBy,
+        action: 'Updated Sale Status',
+        description: `Updated payment status to ${values.paymentStatus} for ${sale?.mobile || 'unknown mobile'}.`
+      });
+    }).catch(async (serverError) => {
+      const permissionError = new FirestorePermissionError({
+        path: docRef.path,
+        operation: 'update',
+        requestResourceData: values,
+      });
+      errorEmitter.emit('permission-error', permissionError);
+    });
+  };
+
   // Filtered data is already prepared via useMemo hooks above
 
 
@@ -2713,6 +2868,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dealerPayments: filteredDealerPayments,
     salesPaymentsLoading,
     dealerPaymentsLoading,
+    dealerSales,
+    dealerDeletes,
+    dealerSalesLoading,
+    dealerDeletesLoading,
     globalHistory,
     deletedNumbers: filteredDeletedNumbers,
     seenActivitiesCount,
@@ -2745,6 +2904,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteReminder,
     assignRemindersToUsers,
     deleteDealerPurchases,
+    markDealerPurchasesAsSold,
     deleteActivities,
     updateSafeCustodyDate,
     bulkUpdateSafeCustodyDate,
@@ -2771,6 +2931,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addDealer,
     updateDealer,
     deleteDealer,
+    bulkUpdateUpcStatus,
+    updateSaleStatuses,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

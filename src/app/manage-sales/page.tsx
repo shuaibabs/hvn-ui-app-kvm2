@@ -150,7 +150,7 @@ export default function ManageSalesPage() {
     ];
 
     const recordsHeader = [
-      "Sr.No", "Mobile", "Sum", "Purchase From", "Purchase Price", "Purchase Date", "Sold To", "Sale Price", "Sale Date"
+      "Sr.No", "Mobile", "Sum", "Purchase From", "Purchase Price", "Purchase Date", "Sold To", "Sale Price", "Sale Date", "Remark", "Reason of Sales"
     ];
 
     const sortedRecordsForExport = [...filteredSales].sort((a, b) =>
@@ -167,6 +167,8 @@ export default function ManageSalesPage() {
       s.soldTo,
       s.salePrice,
       format(s.saleDate.toDate(), 'dd-MM-yyyy'),
+      s.remark || '',
+      s.saleReason || '',
     ]));
 
     const csvData = [...summaryData, recordsHeader, ...recordsData];
@@ -227,25 +229,23 @@ export default function ManageSalesPage() {
     doc.setTextColor(0);
     doc.text(`Total Records: ${filteredSales.length}`, 14, 45);
     doc.text(`Total Billed: INR ${totalSaleAmount.toLocaleString()}`, 70, 45);
-    doc.text(`Total Purchase: INR ${totalPurchaseAmount.toLocaleString()}`, 130, 45);
-    doc.text(`Profit/Loss: INR ${totalProfitLoss.toLocaleString()}`, 190, 45);
-    doc.text(`Remaining: INR ${amountRemaining.toLocaleString()}`, 240, 45);
+    doc.text(`Total Paid: INR ${totalPaid.toLocaleString()}`, 130, 45);
+    doc.text(`Remaining: INR ${amountRemaining.toLocaleString()}`, 190, 45);
 
-    const tableColumn = ["Sr.No", "Mobile", "Sum", "Purchase From", "Purchase Price", "Sold To", "Sale Price", "Sale Date"];
+    const tableColumn = ["Sr.No", "Mobile", "Sum", "Sold To", "Sale Price", "Sale Date", "Reason of Sales"];
     
     const sortedRecords = [...filteredSales].sort((a, b) => 
       b.saleDate.toDate().getTime() - a.saleDate.toDate().getTime()
     );
 
-    const tableRows = sortedRecords.map(s => [
-      s.srNo,
+    const tableRows = sortedRecords.map((s, index) => [
+      index + 1,
       s.mobile,
       s.sum,
-      s.originalNumberData?.purchaseFrom || 'N/A',
-      `INR ${(s.originalNumberData?.purchasePrice || 0).toLocaleString()}`,
       s.soldTo,
       `INR ${s.salePrice.toLocaleString()}`,
-      format(s.saleDate.toDate(), 'dd-MM-yyyy')
+      format(s.saleDate.toDate(), 'dd-MM-yyyy'),
+      s.saleReason || '-'
     ]);
 
     autoTable(doc, {
@@ -256,6 +256,40 @@ export default function ManageSalesPage() {
       headStyles: { fillColor: [41, 128, 185], textColor: 255 },
       alternateRowStyles: { fillColor: [245, 245, 245] },
       margin: { top: 55 }
+    });
+
+    // Payment History Section
+    const finalY = (doc as any).lastAutoTable.finalY || 55;
+    
+    if (finalY > 240) doc.addPage();
+
+    doc.setFontSize(14);
+    doc.setTextColor(41, 128, 185);
+    doc.text("PAYMENT HISTORY", 14, finalY + 15);
+
+    const relevantPayments = salesPayments.filter(p => {
+      const pDate = p.paymentDate.toDate();
+      const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
+      const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
+      const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
+      return vendorMatch && monthMatch && yearMatch;
+    }).sort((a, b) => b.paymentDate.toDate().getTime() - a.paymentDate.toDate().getTime());
+
+    const paymentColumn = ["Date", "Amount", "Notes"];
+    const paymentRows = relevantPayments.map(p => [
+      format(p.paymentDate.toDate(), 'dd-MM-yyyy'),
+      `INR ${p.amount.toLocaleString()}`,
+      p.notes || '-'
+    ]);
+
+    autoTable(doc, {
+      head: [paymentColumn],
+      body: paymentRows,
+      startY: finalY + 20,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [39, 174, 96], textColor: 255 },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      margin: { top: 20 }
     });
 
     const fileName = `Sales_Report_${soldToFilter}_${selectedMonth}_${selectedYear}.pdf`;
@@ -425,11 +459,12 @@ export default function ManageSalesPage() {
               <TableHead>Sold To</TableHead>
               <TableHead>Sale Price</TableHead>
               <TableHead>Sale Date</TableHead>
+              <TableHead>Reason of Sales</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableSpinner colSpan={6} />
+              <TableSpinner colSpan={7} />
             ) : paginatedSales.length > 0 ? (
               paginatedSales.map((sale) => (
                 <TableRow key={sale.id} onClick={() => handleRowClick(sale)} className="cursor-pointer">
@@ -439,11 +474,12 @@ export default function ManageSalesPage() {
                   <TableCell>{sale.soldTo}</TableCell>
                   <TableCell>₹{sale.salePrice.toLocaleString()}</TableCell>
                   <TableCell>{format(sale.saleDate.toDate(), 'PPP')}</TableCell>
+                  <TableCell>{sale.saleReason || '-'}</TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={7} className="h-24 text-center">
                   {searchTerm ? `No sales records found for "${searchTerm}".` : "No sales records found for this filter."}
                 </TableCell>
               </TableRow>

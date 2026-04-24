@@ -12,10 +12,14 @@ import { useApp } from '@/context/app-context';
 import { NewDealerPurchaseData } from '@/lib/data';
 import { Combobox } from '@/components/ui/combobox';
 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 const formSchema = z.object({
   mobile: z.string().regex(/^\d{10}$/, 'Mobile number must be 10 digits.'),
   price: z.coerce.number().min(0, 'Price cannot be negative.'),
   dealerName: z.string().min(1, 'Dealer name is required.'),
+  stockType: z.enum(['Premium', 'Basic']),
+  intendedSalePrice: z.coerce.number().min(0, 'Sale price cannot be negative.'),
 });
 
 type AddDealerPurchaseModalProps = {
@@ -37,6 +41,8 @@ export function AddDealerPurchaseModal({ isOpen, onClose }: AddDealerPurchaseMod
       mobile: '',
       price: 0,
       dealerName: '',
+      stockType: 'Basic',
+      intendedSalePrice: 0,
     },
   });
 
@@ -54,7 +60,13 @@ export function AddDealerPurchaseModal({ isOpen, onClose }: AddDealerPurchaseMod
     } as NewDealerPurchaseData);
     
     onClose();
-    form.reset();
+    form.reset({
+      mobile: '',
+      price: 0,
+      dealerName: '',
+      stockType: 'Basic',
+      intendedSalePrice: 0,
+    });
   }
 
   return (
@@ -67,7 +79,7 @@ export function AddDealerPurchaseModal({ isOpen, onClose }: AddDealerPurchaseMod
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} id="add-dealer-purchase-form" className="space-y-4 py-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} id="add-dealer-purchase-form" className="space-y-4 py-4 max-h-[70vh] overflow-y-auto px-1">
             <FormField
               control={form.control}
               name="mobile"
@@ -100,17 +112,53 @@ export function AddDealerPurchaseModal({ isOpen, onClose }: AddDealerPurchaseMod
             />
             <FormField
               control={form.control}
-              name="price"
+              name="stockType"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Price</FormLabel>
-                  <FormControl>
-                    <Input type="number" placeholder="Enter purchase price" {...field} />
-                  </FormControl>
+                  <FormLabel>Stock Type</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select stock type" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="Premium">Premium Stock</SelectItem>
+                      <SelectItem value="Basic">Basic Stock</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
             />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="price"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Purchase Price</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="0" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="intendedSalePrice"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Intended Sale Price</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="0" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
           </form>
         </Form>
         <DialogFooter>

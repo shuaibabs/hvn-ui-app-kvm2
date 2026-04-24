@@ -69,6 +69,10 @@ export type SaleRecord = {
   uploadStatus: 'Pending' | 'Done';
   createdBy: string;
   originalNumberData: Omit<NumberRecord, 'id'>;
+  remark?: string;
+  saleReason?: string;
+  upcStatus?: 'Pending' | 'Generated';
+  paymentStatus?: 'Pending' | 'Done';
 };
 
 export type DeletedNumberRecord = {
@@ -129,8 +133,37 @@ export type DealerPurchaseRecord = {
   sum: number;
   dealerName: string;
   price: number;
+  stockType: 'Premium' | 'Basic';
+  intendedSalePrice: number;
   createdBy: string;
   history?: LifecycleEvent[];
+};
+
+export type DealerSaleRecord = {
+  id: string;
+  srNo: number;
+  mobile: string;
+  sum: number;
+  dealerName: string;
+  purchasePrice: number;
+  salePrice: number;
+  saleDate: Timestamp;
+  stockType: 'Premium' | 'Basic';
+  createdBy: string;
+  performedBy: string;
+};
+
+export type DealerDeleteRecord = {
+  id: string;
+  srNo: number;
+  mobile: string;
+  sum: number;
+  dealerName: string;
+  purchasePrice: number;
+  deletedAt: Timestamp;
+  deletedBy: string;
+  reason?: string;
+  stockType: 'Premium' | 'Basic';
 };
 
 export type NewDealerPurchaseData = Omit<DealerPurchaseRecord, 'id' | 'srNo' | 'createdBy' | 'sum'>;
