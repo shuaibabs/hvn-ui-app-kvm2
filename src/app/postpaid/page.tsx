@@ -29,7 +29,7 @@ const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100, 250, 500, 1000, 5000];
 type SortableColumn = keyof NumberRecord;
 
 export default function PostpaidPage() {
-  const { numbers, loading, addActivity } = useApp();
+  const { numbers, preBookings, loading, addActivity } = useApp();
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [currentPage, setCurrentPage] = useState(1);
@@ -42,8 +42,15 @@ export default function PostpaidPage() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const postpaidNumbers = useMemo(() => {
-    return numbers.filter(num => num.numberType === 'Postpaid');
-  }, [numbers]);
+    const fromInventory = numbers.filter(num => num.numberType === 'Postpaid');
+    const fromPreBooking = preBookings
+      .filter(pb => pb.originalNumberData?.numberType === 'Postpaid')
+      .map(pb => ({
+        ...pb.originalNumberData,
+        id: pb.id,
+      })) as NumberRecord[];
+    return [...fromInventory, ...fromPreBooking];
+  }, [numbers, preBookings]);
 
   const sortedNumbers = useMemo(() => {
     let sortableItems = [...postpaidNumbers].filter(num =>

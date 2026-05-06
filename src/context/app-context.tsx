@@ -1640,15 +1640,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateSafeCustodyDate = (numberId: string, newDate: Date) => {
     if (!db || !user) return;
-    const num = numbers.find(n => n.id === numberId);
+    
+    let num = numbers.find(n => n.id === numberId);
+    let collectionName = 'numbers';
+    let isPreBooking = false;
+
+    if (!num) {
+      const pb = preBookings.find(p => p.id === numberId);
+      if (pb) {
+        num = { ...pb.originalNumberData, id: pb.id } as NumberRecord;
+        collectionName = 'prebookings';
+        isPreBooking = true;
+      }
+    }
+
     if (!num) return;
 
     const performedBy = user.displayName || user.email || 'User';
     const historyEvent = createLifecycleEvent('COCP Date Changed', `Safe Custody Date changed to ${newDate.toLocaleDateString()}.`, performedBy);
-    const numDocRef = doc(db, 'numbers', numberId);
-    const updateData = { safeCustodyDate: Timestamp.fromDate(newDate) };
+    const numDocRef = doc(db, collectionName, numberId);
+    
+    let updateData: any;
+    if (isPreBooking) {
+      updateData = {
+        'originalNumberData.safeCustodyDate': Timestamp.fromDate(newDate),
+        'originalNumberData.history': arrayUnion(historyEvent)
+      };
+    } else {
+      updateData = {
+        safeCustodyDate: Timestamp.fromDate(newDate),
+        history: arrayUnion(historyEvent)
+      };
+    }
 
-    updateDoc(numDocRef, { ...updateData, history: arrayUnion(historyEvent) }).then(() => {
+    updateDoc(numDocRef, updateData).then(() => {
       addActivity({
         employeeName: performedBy,
         action: 'Updated Safe Custody Date',
@@ -1669,18 +1694,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const batch = writeBatch(db);
     const performedBy = user.displayName || user.email || 'User';
     const historyEvent = createLifecycleEvent('COCP Date Changed', `Safe Custody Date changed to ${newDate.toLocaleDateString()}.`, performedBy);
-    const updateData = { safeCustodyDate: Timestamp.fromDate(newDate) };
-    const affectedNumbers = numbers.filter(n => numberIds.includes(n.id)).map(n => n.mobile);
+    const updateDate = { safeCustodyDate: Timestamp.fromDate(newDate) };
+    
+    const affectedMobiles: string[] = [];
 
     numberIds.forEach(id => {
-      const docRef = doc(db, 'numbers', id);
-      batch.update(docRef, { ...updateData, history: arrayUnion(historyEvent) });
+      const num = numbers.find(n => n.id === id);
+      if (num) {
+        affectedMobiles.push(num.mobile);
+        const docRef = doc(db, 'numbers', id);
+        batch.update(docRef, { ...updateDate, history: arrayUnion(historyEvent) });
+      } else {
+        const pb = preBookings.find(p => p.id === id);
+        if (pb) {
+          affectedMobiles.push(pb.mobile);
+          const docRef = doc(db, 'prebookings', id);
+          batch.update(docRef, {
+            'originalNumberData.safeCustodyDate': Timestamp.fromDate(newDate),
+            'originalNumberData.history': arrayUnion(historyEvent)
+          });
+        }
+      }
     });
+
     batch.commit().then(() => {
       addActivity({
         employeeName: performedBy,
         action: 'Bulk Updated Safe Custody Date',
-        description: createDetailedDescription(`Updated Safe Custody Date to ${newDate.toLocaleDateString()} for`, affectedNumbers)
+        description: createDetailedDescription(`Updated Safe Custody Date to ${newDate.toLocaleDateString()} for`, affectedMobiles)
       });
       toast({
         title: "Update Successful",
@@ -1688,7 +1729,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(async (serverError) => {
       const permissionError = new FirestorePermissionError({
-        path: 'numbers',
+        path: 'numbers/prebookings',
         operation: 'update',
         requestResourceData: { info: `Bulk update of Safe Custody Date for ${numberIds.length} records` },
       });
@@ -1698,15 +1739,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateUnsafeCustodyDate = (numberId: string, newDate: Date) => {
     if (!db || !user) return;
-    const num = numbers.find(n => n.id === numberId);
+    
+    let num = numbers.find(n => n.id === numberId);
+    let collectionName = 'numbers';
+    let isPreBooking = false;
+
+    if (!num) {
+      const pb = preBookings.find(p => p.id === numberId);
+      if (pb) {
+        num = { ...pb.originalNumberData, id: pb.id } as NumberRecord;
+        collectionName = 'prebookings';
+        isPreBooking = true;
+      }
+    }
+
     if (!num) return;
 
     const performedBy = user.displayName || user.email || 'User';
     const historyEvent = createLifecycleEvent('COCP Date Changed', `Unsafe Custody Date changed to ${newDate.toLocaleDateString()}.`, performedBy);
-    const numDocRef = doc(db, 'numbers', numberId);
-    const updateData = { unsafeCustodyDate: Timestamp.fromDate(newDate) };
+    const numDocRef = doc(db, collectionName, numberId);
+    
+    let updateData: any;
+    if (isPreBooking) {
+      updateData = {
+        'originalNumberData.unsafeCustodyDate': Timestamp.fromDate(newDate),
+        'originalNumberData.history': arrayUnion(historyEvent)
+      };
+    } else {
+      updateData = {
+        unsafeCustodyDate: Timestamp.fromDate(newDate),
+        history: arrayUnion(historyEvent)
+      };
+    }
 
-    updateDoc(numDocRef, { ...updateData, history: arrayUnion(historyEvent) }).then(() => {
+    updateDoc(numDocRef, updateData).then(() => {
       addActivity({
         employeeName: performedBy,
         action: 'Updated Unsafe Custody Date',
@@ -1727,18 +1793,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const batch = writeBatch(db);
     const performedBy = user.displayName || user.email || 'User';
     const historyEvent = createLifecycleEvent('COCP Date Changed', `Unsafe Custody Date changed to ${newDate.toLocaleDateString()}.`, performedBy);
-    const updateData = { unsafeCustodyDate: Timestamp.fromDate(newDate) };
-    const affectedNumbers = numbers.filter(n => numberIds.includes(n.id)).map(n => n.mobile);
+    const updateDate = { unsafeCustodyDate: Timestamp.fromDate(newDate) };
+    
+    const affectedMobiles: string[] = [];
 
     numberIds.forEach(id => {
-      const docRef = doc(db, 'numbers', id);
-      batch.update(docRef, { ...updateData, history: arrayUnion(historyEvent) });
+      const num = numbers.find(n => n.id === id);
+      if (num) {
+        affectedMobiles.push(num.mobile);
+        const docRef = doc(db, 'numbers', id);
+        batch.update(docRef, { ...updateDate, history: arrayUnion(historyEvent) });
+      } else {
+        const pb = preBookings.find(p => p.id === id);
+        if (pb) {
+          affectedMobiles.push(pb.mobile);
+          const docRef = doc(db, 'prebookings', id);
+          batch.update(docRef, {
+            'originalNumberData.unsafeCustodyDate': Timestamp.fromDate(newDate),
+            'originalNumberData.history': arrayUnion(historyEvent)
+          });
+        }
+      }
     });
+
     batch.commit().then(() => {
       addActivity({
         employeeName: performedBy,
         action: 'Bulk Updated Unsafe Custody Date',
-        description: createDetailedDescription(`Updated Unsafe Custody Date to ${newDate.toLocaleDateString()} for`, affectedNumbers)
+        description: createDetailedDescription(`Updated Unsafe Custody Date to ${newDate.toLocaleDateString()} for`, affectedMobiles)
       });
       toast({
         title: "Update Successful",
@@ -1746,7 +1828,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(async (serverError) => {
       const permissionError = new FirestorePermissionError({
-        path: 'numbers',
+        path: 'numbers/prebookings',
         operation: 'update',
         requestResourceData: { info: `Bulk update of Unsafe Custody Date for ${numberIds.length} records` },
       });
@@ -2507,18 +2589,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updatePostpaidDetails = (id: string, details: { billDate: Date, pdBill: 'Yes' | 'No' }) => {
     if (!db || !user) return;
-    const num = numbers.find(n => n.id === id);
+    
+    let num = numbers.find(n => n.id === id);
+    let collectionName = 'numbers';
+    let isPreBooking = false;
+
+    if (!num) {
+      const pb = preBookings.find(p => p.id === id);
+      if (pb) {
+        num = { ...pb.originalNumberData, id: pb.id } as NumberRecord;
+        collectionName = 'prebookings';
+        isPreBooking = true;
+      }
+    }
+
     if (!num) return;
 
     const performedBy = user.displayName || user.email || 'User';
     const historyEvent = createLifecycleEvent('Postpaid Details Updated', `Bill Date set to ${details.billDate.toLocaleDateString()}, PD Bill set to ${details.pdBill}.`, performedBy);
 
-    const numDocRef = doc(db, 'numbers', id);
-    const updateData = {
-      billDate: Timestamp.fromDate(details.billDate),
-      pdBill: details.pdBill
-    };
-    updateDoc(numDocRef, { ...updateData, history: arrayUnion(historyEvent) }).then(() => {
+    const numDocRef = doc(db, collectionName, id);
+    let updateData: any;
+    if (isPreBooking) {
+      updateData = {
+        'originalNumberData.billDate': Timestamp.fromDate(details.billDate),
+        'originalNumberData.pdBill': details.pdBill,
+        'originalNumberData.history': arrayUnion(historyEvent)
+      };
+    } else {
+      updateData = {
+        billDate: Timestamp.fromDate(details.billDate),
+        pdBill: details.pdBill,
+        history: arrayUnion(historyEvent)
+      };
+    }
+
+    updateDoc(numDocRef, updateData).then(() => {
       addActivity({
         employeeName: performedBy,
         action: 'Updated Postpaid Details',
@@ -2539,22 +2645,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const batch = writeBatch(db);
     const performedBy = user.displayName || user.email || 'User';
     const historyEvent = createLifecycleEvent('Postpaid Details Updated', `Bulk updated: Bill Date to ${details.billDate.toLocaleDateString()}, PD Bill to ${details.pdBill}.`, performedBy);
-    const updateData = {
-      billDate: Timestamp.fromDate(details.billDate),
-      pdBill: details.pdBill
-    };
-    const affectedNumbers = numbers.filter(n => numberIds.includes(n.id)).map(n => n.mobile);
+    
+    const affectedMobiles: string[] = [];
 
     numberIds.forEach(id => {
-      const docRef = doc(db, 'numbers', id);
-      batch.update(docRef, { ...updateData, history: arrayUnion(historyEvent) });
+      const num = numbers.find(n => n.id === id);
+      if (num) {
+        affectedMobiles.push(num.mobile);
+        const docRef = doc(db, 'numbers', id);
+        batch.update(docRef, {
+          billDate: Timestamp.fromDate(details.billDate),
+          pdBill: details.pdBill,
+          history: arrayUnion(historyEvent)
+        });
+      } else {
+        const pb = preBookings.find(p => p.id === id);
+        if (pb) {
+          affectedMobiles.push(pb.mobile);
+          const docRef = doc(db, 'prebookings', id);
+          batch.update(docRef, {
+            'originalNumberData.billDate': Timestamp.fromDate(details.billDate),
+            'originalNumberData.pdBill': details.pdBill,
+            'originalNumberData.history': arrayUnion(historyEvent)
+          });
+        }
+      }
     });
 
     batch.commit().then(() => {
       addActivity({
         employeeName: performedBy,
         action: 'Bulk Updated Postpaid Details',
-        description: createDetailedDescription(`Updated bill details for`, affectedNumbers)
+        description: createDetailedDescription(`Updated bill details for`, affectedMobiles)
       });
       toast({
         title: "Update Successful",
@@ -2562,7 +2684,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }).catch(async (serverError) => {
       const permissionError = new FirestorePermissionError({
-        path: 'numbers',
+        path: 'numbers/prebookings',
         operation: 'update',
         requestResourceData: { info: `Bulk update of postpaid details for ${numberIds.length} records` },
       });

@@ -46,7 +46,7 @@ const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100, 250, 500, 1000, 5000];
 type SortableColumn = keyof NumberRecord;
 
 export default function CocpPage() {
-  const { numbers, loading, addActivity } = useApp();
+  const { numbers, preBookings, loading, addActivity } = useApp();
   const { user, role } = useAuth();
   const { toast } = useToast();
   const [currentPage, setCurrentPage] = useState(1);
@@ -61,8 +61,15 @@ export default function CocpPage() {
   const [advancedSearch, setAdvancedSearch] = useState<AdvancedSearchState>(initialAdvancedSearchState);
 
   const cocpNumbers = useMemo(() => {
-    return numbers.filter(num => num.numberType === 'COCP');
-  }, [numbers]);
+    const fromInventory = numbers.filter(num => num.numberType === 'COCP');
+    const fromPreBooking = preBookings
+      .filter(pb => pb.originalNumberData?.numberType === 'COCP')
+      .map(pb => ({
+        ...pb.originalNumberData,
+        id: pb.id,
+      })) as NumberRecord[];
+    return [...fromInventory, ...fromPreBooking];
+  }, [numbers, preBookings]);
 
   const sortedNumbers = useMemo(() => {
     let sortableItems = [...cocpNumbers].filter(num =>
