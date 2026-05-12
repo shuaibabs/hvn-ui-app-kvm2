@@ -35,6 +35,7 @@ import { AdvancedSearch, type AdvancedSearchState } from '@/components/advanced-
 import { BulkUploadStatusChangeModal } from '@/components/bulk-upload-status-change-modal';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { BulkUpdateSalePriceModal } from '@/components/bulk-update-sale-price-modal';
 
 type SortableColumn = keyof NumberRecord | 'id' | 'twoDigitSum';
 
@@ -71,6 +72,7 @@ export default function AllNumbersPage() {
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isBulkUploadStatusChangeModalOpen, setIsBulkUploadStatusChangeModalOpen] = useState(false);
+  const [isBulkUpdateSalePriceModalOpen, setIsBulkUpdateSalePriceModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
@@ -451,6 +453,10 @@ export default function AllNumbersPage() {
             <UploadCloud className="mr-2 h-4 w-4" />
             Bulk Upload Status
           </Button>
+          <Button variant="outline" onClick={() => setIsBulkUpdateSalePriceModalOpen(true)} className="w-full sm:w-auto">
+            <DollarSign className="mr-2 h-4 w-4" />
+            Update Sale Price
+          </Button>
           {role === 'admin' && (
             <Button variant="destructive" onClick={() => setIsBulkDeleteModalOpen(true)} className="w-full sm:w-auto">
               <Trash className="mr-2 h-4 w-4" />
@@ -726,6 +732,10 @@ export default function AllNumbersPage() {
       <BulkUploadStatusChangeModal
         isOpen={isBulkUploadStatusChangeModalOpen}
         onClose={() => setIsBulkUploadStatusChangeModalOpen(false)}
+      />
+      <BulkUpdateSalePriceModal
+        isOpen={isBulkUpdateSalePriceModalOpen}
+        onClose={() => setIsBulkUpdateSalePriceModalOpen(false)}
       />
       {role === 'admin' && (
         <AssignNumbersModal

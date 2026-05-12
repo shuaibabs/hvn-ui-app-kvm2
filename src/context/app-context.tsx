@@ -186,6 +186,7 @@ type AppContextType = {
   dealerDeletesLoading: boolean;
   bulkUpdateUpcStatus: (saleIds: string[], upcStatus: 'Pending' | 'Generated') => void;
   updateSaleStatuses: (saleId: string, values: { paymentStatus: 'Pending' | 'Done' }) => void;
+  bulkUpdateSalePrice: (updates: { mobile: string, salePrice: number }[]) => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1064,6 +1065,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       errorEmitter.emit('permission-error', permissionError);
     });
+  };
+
+  const bulkUpdateSalePrice = async (updates: { mobile: string, salePrice: number }[]) => {
+    if (!db || !user) return;
+    const batch = writeBatch(db);
+    const performedBy = user.displayName || user.email || 'User';
+    const affectedNumbers: string[] = [];
+
+    updates.forEach(update => {
+      const num = numbers.find(n => n.mobile === update.mobile);
+      if (num) {
+        affectedNumbers.push(num.mobile);
+        const docRef = doc(db, 'numbers', num.id);
+        const historyEvent = createLifecycleEvent('Sale Price Updated', `Sale price updated to ₹${update.salePrice.toLocaleString()} via bulk update.`, performedBy);
+        batch.update(docRef, { 
+          salePrice: update.salePrice,
+          history: arrayUnion(historyEvent)
+        });
+      }
+    });
+
+    if (affectedNumbers.length > 0) {
+      await batch.commit().then(() => {
+        addActivity({
+          employeeName: performedBy,
+          action: 'Bulk Updated Sale Price',
+          description: createDetailedDescription(`Updated sale price for`, affectedNumbers)
+        });
+        toast({
+          title: "Update Successful",
+          description: `Updated sale price for ${affectedNumbers.length} number(s).`
+        });
+      }).catch(async (serverError) => {
+        const permissionError = new FirestorePermissionError({
+          path: 'numbers',
+          operation: 'update',
+          requestResourceData: { info: `Bulk sale price update for ${updates.length} numbers` },
+        });
+        errorEmitter.emit('permission-error', permissionError);
+      });
+    }
   };
 
   const canReminderBeMarkedDone = (reminder: Reminder): { canBeDone: boolean; message: string } => {
@@ -3055,6 +3097,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteDealer,
     bulkUpdateUpcStatus,
     updateSaleStatuses,
+    bulkUpdateSalePrice,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
