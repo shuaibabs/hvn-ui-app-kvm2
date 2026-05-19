@@ -51,12 +51,68 @@ export default function ManageSalesPage() {
     return [...new Set(['all', ...allVendors])];
   }, [sales]);
 
+  const availableWeeks = useMemo(() => {
+    if (selectedMonth === 'all' || selectedYear === 'all') {
+      return [];
+    }
+    const year = parseInt(selectedYear);
+    const month = parseInt(selectedMonth) - 1;
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+
+    const weeks = [];
+    let current = start;
+    let weekIndex = 1;
+
+    while (current <= end) {
+      const dayOfWeek = current.getDay();
+      const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+      
+      const weekEnd = new Date(current);
+      weekEnd.setDate(current.getDate() + daysUntilSunday);
+      
+      const actualEnd = weekEnd > end ? end : weekEnd;
+
+      weeks.push({
+        id: weekIndex.toString(),
+        label: `Week ${weekIndex} (${format(current, 'dd MMM')} - ${format(actualEnd, 'dd MMM')})`,
+        start: new Date(current),
+        end: new Date(actualEnd)
+      });
+
+      current = new Date(actualEnd);
+      current.setDate(current.getDate() + 1);
+      weekIndex++;
+    }
+    return weeks;
+  }, [selectedMonth, selectedYear]);
+
   const filteredSales = useMemo(() => {
     return sales.filter(sale => {
       const saleDate = sale.saleDate.toDate();
       const monthMatch = selectedMonth === 'all' || (saleDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || saleDate.getFullYear().toString() === selectedYear;
-      const weekMatch = selectedWeek === 'all' || getWeek(saleDate).toString() === selectedWeek;
+      
+      let weekMatch = true;
+      if (selectedWeek !== 'all') {
+        if (availableWeeks.length > 0) {
+          const selectedWeekData = availableWeeks.find(w => w.id === selectedWeek);
+          if (selectedWeekData) {
+            const sDate = new Date(saleDate);
+            sDate.setHours(0,0,0,0);
+            const wStart = new Date(selectedWeekData.start);
+            wStart.setHours(0,0,0,0);
+            const wEnd = new Date(selectedWeekData.end);
+            wEnd.setHours(23,59,59,999);
+            weekMatch = sDate >= wStart && sDate <= wEnd;
+          } else {
+            weekMatch = false;
+          }
+        } else {
+          weekMatch = false;
+        }
+      }
+
       const vendorMatch = soldToFilter === 'all' || sale.soldTo === soldToFilter;
       const searchMatch = !searchTerm || (sale.mobile && sale.mobile.toLowerCase().includes(searchTerm.toLowerCase()));
       
@@ -74,7 +130,7 @@ export default function ManageSalesPage() {
 
       return monthMatch && yearMatch && weekMatch && vendorMatch && searchMatch && dateRangeMatch;
     });
-  }, [sales, soldToFilter, searchTerm, selectedMonth, selectedWeek, selectedYear, fromDate, toDate]);
+  }, [sales, soldToFilter, searchTerm, selectedMonth, selectedWeek, selectedYear, fromDate, toDate, availableWeeks]);
 
   const { totalPurchaseAmount, totalSaleAmount } = useMemo(() => {
     return filteredSales.reduce((acc, sale) => {
@@ -90,7 +146,26 @@ export default function ManageSalesPage() {
       const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
       const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
-      const weekMatch = selectedWeek === 'all' || getWeek(pDate).toString() === selectedWeek;
+      
+      let weekMatch = true;
+      if (selectedWeek !== 'all') {
+        if (availableWeeks.length > 0) {
+          const selectedWeekData = availableWeeks.find(w => w.id === selectedWeek);
+          if (selectedWeekData) {
+            const pDateObj = new Date(pDate);
+            pDateObj.setHours(0,0,0,0);
+            const wStart = new Date(selectedWeekData.start);
+            wStart.setHours(0,0,0,0);
+            const wEnd = new Date(selectedWeekData.end);
+            wEnd.setHours(23,59,59,999);
+            weekMatch = pDateObj >= wStart && pDateObj <= wEnd;
+          } else {
+            weekMatch = false;
+          }
+        } else {
+          weekMatch = false;
+        }
+      }
 
       let dateRangeMatch = true;
       if (fromDate) {
@@ -110,7 +185,7 @@ export default function ManageSalesPage() {
     const paid = relevantPayments.reduce((sum, p) => sum + p.amount, 0);
 
     return { totalPaid: paid, amountRemaining: totalSaleAmount - paid };
-  }, [salesPayments, soldToFilter, totalSaleAmount, selectedMonth, selectedWeek, selectedYear, fromDate, toDate]);
+  }, [salesPayments, soldToFilter, totalSaleAmount, selectedMonth, selectedWeek, selectedYear, fromDate, toDate, availableWeeks]);
 
   const totalProfitLoss = totalSaleAmount - totalPurchaseAmount;
 
@@ -310,7 +385,26 @@ export default function ManageSalesPage() {
       const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
       const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
-      const weekMatch = selectedWeek === 'all' || getWeek(pDate).toString() === selectedWeek;
+      
+      let weekMatch = true;
+      if (selectedWeek !== 'all') {
+        if (availableWeeks.length > 0) {
+          const selectedWeekData = availableWeeks.find(w => w.id === selectedWeek);
+          if (selectedWeekData) {
+            const pDateObj = new Date(pDate);
+            pDateObj.setHours(0,0,0,0);
+            const wStart = new Date(selectedWeekData.start);
+            wStart.setHours(0,0,0,0);
+            const wEnd = new Date(selectedWeekData.end);
+            wEnd.setHours(23,59,59,999);
+            weekMatch = pDateObj >= wStart && pDateObj <= wEnd;
+          } else {
+            weekMatch = false;
+          }
+        } else {
+          weekMatch = false;
+        }
+      }
 
       let dateRangeMatch = true;
       if (fromDate) {
@@ -464,7 +558,11 @@ export default function ManageSalesPage() {
             </SelectContent>
           </Select>
 
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+          <Select value={selectedMonth} onValueChange={(val) => {
+            setSelectedMonth(val);
+            setSelectedWeek('all');
+            setCurrentPage(1);
+          }}>
             <SelectTrigger className="w-[140px]">
               <SelectValue placeholder="Month" />
             </SelectTrigger>
@@ -478,21 +576,25 @@ export default function ManageSalesPage() {
             </SelectContent>
           </Select>
 
-          <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-            <SelectTrigger className="w-[120px]">
+          <Select value={selectedWeek} onValueChange={setSelectedWeek} disabled={selectedMonth === 'all' || selectedYear === 'all'}>
+            <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Week" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Weeks</SelectItem>
-              {Array.from({ length: 53 }, (_, i) => (
-                <SelectItem key={i + 1} value={(i + 1).toString()}>
-                  Week {i + 1}
+              {availableWeeks.map(w => (
+                <SelectItem key={w.id} value={w.id}>
+                  {w.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Select value={selectedYear} onValueChange={setSelectedYear}>
+          <Select value={selectedYear} onValueChange={(val) => {
+            setSelectedYear(val);
+            setSelectedWeek('all');
+            setCurrentPage(1);
+          }}>
             <SelectTrigger className="w-[100px]">
               <SelectValue placeholder="Year" />
             </SelectTrigger>
