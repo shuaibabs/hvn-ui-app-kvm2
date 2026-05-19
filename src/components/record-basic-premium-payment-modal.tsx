@@ -13,14 +13,14 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CalendarIcon, Loader2 } from 'lucide-react';
 
-interface RecordDealerPaymentModalProps {
+interface RecordBasicPremiumPaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  dealerName: string;
+  vendorName: string;
 }
 
-export function RecordDealerPaymentModal({ isOpen, onClose, dealerName }: RecordDealerPaymentModalProps) {
-  const { addDealerPayment } = useApp();
+export function RecordBasicPremiumPaymentModal({ isOpen, onClose, vendorName }: RecordBasicPremiumPaymentModalProps) {
+  const { addBasicPremiumPayment } = useApp();
   const [amount, setAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState<Date>(new Date());
   const [notes, setNotes] = useState('');
@@ -32,8 +32,8 @@ export function RecordDealerPaymentModal({ isOpen, onClose, dealerName }: Record
 
     setIsSubmitting(true);
     try {
-      addDealerPayment({
-        vendorName: dealerName,
+      await addBasicPremiumPayment({
+        vendorName: vendorName,
         amount: Number(amount),
         paymentDate,
         notes: notes.trim() || '',
@@ -51,9 +51,9 @@ export function RecordDealerPaymentModal({ isOpen, onClose, dealerName }: Record
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Record Dealer Payment</DialogTitle>
+          <DialogTitle>Record Basic/Premium Payment</DialogTitle>
           <DialogDescription>
-            Record a payment made to <strong>{dealerName}</strong>.
+            Record a payment made to <strong>{vendorName}</strong> for Basic/Premium stock.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-4">

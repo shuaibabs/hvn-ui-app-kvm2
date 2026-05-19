@@ -64,34 +64,54 @@ export default function DealerPurchasesPage() {
   const [deleteReason, setDeleteReason] = useState('Manual Deletion');
   const [processingRecords, setProcessingRecords] = useState<DealerPurchaseRecord[]>([]);
 
+  const allPurchasedRecords = useMemo(() => {
+    const active = dealerPurchases.map(p => ({
+      dealerName: p.dealerName || 'Unknown',
+      price: Number(p.price) || 0,
+    }));
+
+    const sold = dealerSales.map(s => ({
+      dealerName: s.dealerName || 'Unknown',
+      price: Number(s.purchasePrice) || 0,
+    }));
+
+    const deleted = dealerDeletes.map(d => ({
+      dealerName: d.dealerName || 'Unknown',
+      price: Number(d.purchasePrice) || 0,
+    }));
+
+    return [...active, ...sold, ...deleted];
+  }, [dealerPurchases, dealerSales, dealerDeletes]);
+
   const dealerOptions = useMemo(() => {
-    const allDealers = dealerPurchases.map(p => p.dealerName).filter(Boolean);
-    return [...new Set(['all', ...allDealers])];
-  }, [dealerPurchases]);
+    const allDealers = allPurchasedRecords.map(p => p.dealerName).filter(Boolean);
+    const fromPayments = dealerPayments.map(p => p.vendorName).filter(Boolean);
+    return [...new Set(['all', ...allDealers, ...fromPayments])];
+  }, [allPurchasedRecords, dealerPayments]);
 
   const { totalBilled, totalPaid, amountRemaining } = useMemo(() => {
     const relevantPurchases = dealerFilter === 'all'
-      ? dealerPurchases
-      : dealerPurchases.filter(p => p.dealerName === dealerFilter);
+      ? allPurchasedRecords
+      : allPurchasedRecords.filter(p => p.dealerName === dealerFilter);
 
-    const totalBilled = relevantPurchases.reduce((sum, p) => sum + (p.price || 0), 0);
+    const totalBilled = relevantPurchases.reduce((sum, p) => sum + p.price, 0);
     
     // Get unique dealer names from relevant purchase records if 'all', else just the filtered dealer
     const dealerNames = dealerFilter === 'all' 
-      ? new Set(dealerPurchases.map(p => p.dealerName))
+      ? new Set([...allPurchasedRecords.map(p => p.dealerName), ...dealerPayments.map(p => p.vendorName)])
       : new Set([dealerFilter]);
     
     // Sum payments for these dealers from dealerPayments collection
     const totalPaid = dealerPayments
       .filter(p => dealerNames.has(p.vendorName))
-      .reduce((sum, p) => sum + (p.amount || 0), 0);
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
       
     return {
       totalBilled,
       totalPaid,
       amountRemaining: totalBilled - totalPaid
     };
-  }, [dealerPurchases, dealerPayments, dealerFilter]);
+  }, [allPurchasedRecords, dealerPayments, dealerFilter]);
 
   const sortedPurchases = useMemo(() => {
     let items = activeTab === 'inventory' ? dealerPurchases : activeTab === 'sales' ? dealerSales : dealerDeletes;

@@ -60,6 +60,8 @@ const navItems: {
     { href: '/reminders', label: 'Work Reminders', icon: ClipboardList, adminOnly: false },
     { href: '/cocp', label: 'COCP', icon: RadioTower, adminOnly: false },
     { href: '/deleted-numbers', label: 'Deleted Numbers', icon: Trash2, adminOnly: false },
+    { href: '/basic-premium', label: 'Basic / Premium', icon: Smartphone, adminOnly: false },
+    { href: '/basic-premium-vendors', label: 'Manage B/P Vendors', icon: Users, adminOnly: false },
     { href: '/activities', label: 'Activities', icon: History, adminOnly: false },
     { href: '/import-export', label: 'Import / Export', icon: FileOutput, adminOnly: false },
   ];

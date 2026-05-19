@@ -20,10 +20,12 @@ import {
   GlobalHistoryRecord,
   LifecycleEvent,
   DeletedNumberRecord,
-  SalesVendorRecord,
   DealerRecord,
   DealerSaleRecord,
   DealerDeleteRecord,
+  BasicPremiumVendorRecord,
+  NewBasicPremiumVendorData,
+  SalesVendorRecord,
 } from '@/lib/data';
 import { useToast } from '@/hooks/use-toast';
 import { isToday, isPast, isValid, parse, subDays } from 'date-fns';
@@ -187,6 +189,25 @@ type AppContextType = {
   bulkUpdateUpcStatus: (saleIds: string[], upcStatus: 'Pending' | 'Generated') => void;
   updateSaleStatuses: (saleId: string, values: { paymentStatus: 'Pending' | 'Done' }) => void;
   bulkUpdateSalePrice: (updates: { mobile: string, salePrice: number }[]) => Promise<void>;
+  basicNumbers: NumberRecord[];
+  premiumNumbers: NumberRecord[];
+  basicPremiumVendors: BasicPremiumVendorRecord[];
+  basicPremiumSales: DealerSaleRecord[];
+  basicPremiumDeletes: DealerDeleteRecord[];
+  basicPremiumPayments: PaymentRecord[];
+  addBasicPremiumNumber: (data: NewNumberData, collectionType: 'basic' | 'premium') => void;
+  deleteBasicPremiumNumbers: (records: NumberRecord[], collectionType: 'basic' | 'premium', reason?: string) => void;
+  markBasicPremiumNumbersAsSold: (records: NumberRecord[], collectionType: 'basic' | 'premium', salePrice: number) => void;
+  addBasicPremiumPayment: (data: NewPaymentData) => void;
+  addBasicPremiumVendor: (name: string) => Promise<void>;
+  updateBasicPremiumVendor: (id: string, newName: string) => Promise<void>;
+  deleteBasicPremiumVendor: (id: string) => Promise<void>;
+  basicNumbersLoading: boolean;
+  premiumNumbersLoading: boolean;
+  basicPremiumVendorsLoading: boolean;
+  basicPremiumSalesLoading: boolean;
+  basicPremiumDeletesLoading: boolean;
+  basicPremiumPaymentsLoading: boolean;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -212,6 +233,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [vendors, setVendors] = useState<string[]>([]);
   const [salesVendors, setSalesVendors] = useState<SalesVendorRecord[]>([]);
   const [dealers, setDealers] = useState<DealerRecord[]>([]);
+  const [basicNumbers, setBasicNumbers] = useState<NumberRecord[]>([]);
+  const [premiumNumbers, setPremiumNumbers] = useState<NumberRecord[]>([]);
+  const [basicPremiumVendors, setBasicPremiumVendors] = useState<BasicPremiumVendorRecord[]>([]);
+  const [basicPremiumSales, setBasicPremiumSales] = useState<DealerSaleRecord[]>([]);
+  const [basicPremiumDeletes, setBasicPremiumDeletes] = useState<DealerDeleteRecord[]>([]);
+  const [basicPremiumPayments, setBasicPremiumPayments] = useState<PaymentRecord[]>([]);
 
   const [roleFilteredActivities, setRoleFilteredActivities] = useState<Activity[]>([]);
   const [seenActivitiesCount, setSeenActivitiesCount] = useState(0);
@@ -234,6 +261,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dealerPaymentsLoading, setDealerPaymentsLoading] = useState(true);
   const [salesVendorsLoading, setSalesVendorsLoading] = useState(true);
   const [dealersLoading, setDealersLoading] = useState(true);
+  const [basicNumbersLoading, setBasicNumbersLoading] = useState(true);
+  const [premiumNumbersLoading, setPremiumNumbersLoading] = useState(true);
+  const [basicPremiumVendorsLoading, setBasicPremiumVendorsLoading] = useState(true);
+  const [basicPremiumSalesLoading, setBasicPremiumSalesLoading] = useState(true);
+  const [basicPremiumDeletesLoading, setBasicPremiumDeletesLoading] = useState(true);
+  const [basicPremiumPaymentsLoading, setBasicPremiumPaymentsLoading] = useState(true);
 
   // Combined loading state: true if auth is loading OR if auth is done but any data is still loading.
   const loading =
@@ -252,7 +285,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       salesPaymentsLoading ||
       dealerPaymentsLoading ||
       salesVendorsLoading ||
-      dealersLoading
+      dealersLoading ||
+      basicNumbersLoading ||
+      premiumNumbersLoading ||
+      basicPremiumVendorsLoading ||
+      basicPremiumSalesLoading ||
+      basicPremiumDeletesLoading ||
+      basicPremiumPaymentsLoading
     ));
 
   const createLifecycleEvent = useCallback((action: string, description: string, performedBy: string): LifecycleEvent => ({
@@ -327,6 +366,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'Added Dealer Purchase': 'DEALER_PURCHASES',
       'Deleted Dealer Purchases': 'DEALER_PURCHASES',
       'Recorded Payment': 'DEALER_PURCHASES',
+
+      // BASIC_PREMIUM (New feature)
+      'Added Basic/Premium Number': 'BASIC_PREMIUM_NUMBERS',
+      'Deleted Basic/Premium Numbers': 'BASIC_PREMIUM_NUMBERS',
+      'Recorded Basic/Premium Payment': 'BASIC_PREMIUM_NUMBERS',
+      'Sold Basic/Premium Numbers': 'BASIC_PREMIUM_NUMBERS',
 
       // WORK_REMINDERS
       'Added Reminder': 'WORK_REMINDERS',
@@ -529,6 +574,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       { name: 'salesPayments', setter: setSalesPayments, loader: setSalesPaymentsLoading },
       { name: 'dealerPayments', setter: setDealerPayments, loader: setDealerPaymentsLoading },
+      { name: 'basic', setter: setBasicNumbers, loader: setBasicNumbersLoading },
+      { name: 'premium', setter: setPremiumNumbers, loader: setPremiumNumbersLoading },
+      { name: 'basicPremiumVendors', setter: setBasicPremiumVendors, loader: setBasicPremiumVendorsLoading },
+      { name: 'basicPremiumSales', setter: setBasicPremiumSales, loader: setBasicPremiumSalesLoading },
+      { name: 'basicPremiumDeletes', setter: setBasicPremiumDeletes, loader: setBasicPremiumDeletesLoading },
+      { name: 'basicPremiumPayments', setter: setBasicPremiumPayments, loader: setBasicPremiumPaymentsLoading },
     ];
 
     collectionMappings.push({ name: 'deletedNumbers', setter: setDeletedNumbers, loader: setDeletedNumbersLoading });
@@ -558,6 +609,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else if (name === 'salesPayments') {
           q = query(collectionRef, where("createdBy", "==", user.uid));
         } else if (name === 'dealerPayments') {
+          q = query(collectionRef, where("createdBy", "==", user.uid));
+        } else if (['basic', 'premium', 'basicPremiumSales', 'basicPremiumDeletes', 'basicPremiumPayments'].includes(name)) {
           q = query(collectionRef, where("createdBy", "==", user.uid));
         }
       }
@@ -689,6 +742,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...sales.map(s => s.mobile),
       ...dealerPurchases.map(dp => dp.mobile),
       ...preBookings.map(pb => pb.mobile),
+      ...basicNumbers.map(n => n.mobile),
+      ...premiumNumbers.map(n => n.mobile),
     ]);
 
     // For an update operation, we need to check if the new mobile number
@@ -3015,7 +3070,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Filtered data is already prepared via useMemo hooks above
 
-
   const value: AppContextType = {
     loading,
     numbers: filteredNumbers,
@@ -3098,6 +3152,139 @@ export function AppProvider({ children }: { children: ReactNode }) {
     bulkUpdateUpcStatus,
     updateSaleStatuses,
     bulkUpdateSalePrice,
+    basicNumbers,
+    premiumNumbers,
+    basicPremiumVendors,
+    basicPremiumSales,
+    basicPremiumDeletes,
+    basicPremiumPayments,
+    addBasicPremiumNumber: async (data: NewNumberData, collectionType: 'basic' | 'premium') => {
+      if (!db || !user) return;
+      if (isMobileNumberDuplicate(data.mobile)) {
+        toast({ variant: 'destructive', title: 'Duplicate Number', description: `The mobile number ${data.mobile} already exists.` });
+        return;
+      }
+      const performedBy = user.displayName || user.email || 'User';
+      const historyEvent = createLifecycleEvent('Created', `Number added to ${collectionType} inventory by ${performedBy}.`, performedBy);
+      const newNumber = sanitizeObjectForFirestore({
+        ...data,
+        srNo: getNextSrNo(collectionType === 'basic' ? basicNumbers : premiumNumbers),
+        sum: calculateDigitalRoot(data.mobile),
+        createdBy: user.uid,
+        purchaseDate: Timestamp.fromDate(data.purchaseDate),
+        rtpDate: data.rtpDate ? Timestamp.fromDate(data.rtpDate) : null,
+        history: [historyEvent],
+        status: data.status || 'Non-RTP',
+        uploadStatus: data.uploadStatus || 'Pending',
+        numberType: data.numberType || 'Prepaid',
+        currentLocation: 'Dealer',
+        locationType: 'Dealer',
+        assignedTo: 'Unassigned',
+      });
+      await addDoc(collection(db, collectionType), newNumber).then(() => {
+        addActivity({
+          employeeName: performedBy,
+          action: 'Added Basic/Premium Number',
+          description: `Added new ${collectionType} number ${data.mobile} from ${data.purchaseFrom}`
+        });
+      });
+    },
+    deleteBasicPremiumNumbers: async (records: NumberRecord[], collectionType: 'basic' | 'premium', reason: string = 'Manual Deletion') => {
+      if (!db || !user || role !== 'admin') return;
+      const batch = writeBatch(db);
+      const performedBy = user.displayName || user.email || 'User';
+      const affectedNumbers = records.map(r => r.mobile);
+      records.forEach(record => {
+        const deleteRecord = {
+          srNo: record.srNo,
+          mobile: record.mobile,
+          sum: record.sum,
+          dealerName: record.purchaseFrom,
+          purchasePrice: record.purchasePrice,
+          deletedAt: Timestamp.now(),
+          deletedBy: performedBy,
+          reason,
+          stockType: collectionType === 'premium' ? 'Premium' : 'Basic'
+        };
+        batch.set(doc(collection(db, 'basicPremiumDeletes')), deleteRecord);
+        batch.delete(doc(db, collectionType, record.id));
+      });
+      await batch.commit().then(() => {
+        addActivity({
+          employeeName: performedBy,
+          action: 'Deleted Basic/Premium Numbers',
+          description: `Reason: ${reason}. Moved ${records.length} ${collectionType} number(s) to Deletes.`
+        });
+      });
+    },
+    markBasicPremiumNumbersAsSold: async (records: NumberRecord[], collectionType: 'basic' | 'premium', salePrice: number) => {
+      if (!db || !user) return;
+      const batch = writeBatch(db);
+      const performedBy = user.displayName || user.email || 'User';
+      records.forEach(record => {
+        const saleRecord = {
+          srNo: record.srNo,
+          mobile: record.mobile,
+          sum: record.sum,
+          dealerName: record.purchaseFrom,
+          purchasePrice: record.purchasePrice,
+          salePrice,
+          saleDate: Timestamp.now(),
+          stockType: collectionType === 'premium' ? 'Premium' : 'Basic',
+          createdBy: record.createdBy,
+          performedBy
+        };
+        batch.set(doc(collection(db, 'basicPremiumSales')), saleRecord);
+        batch.delete(doc(db, collectionType, record.id));
+      });
+      await batch.commit().then(() => {
+        addActivity({
+          employeeName: performedBy,
+          action: 'Sold Basic/Premium Numbers',
+          description: `Sold ${records.length} ${collectionType} number(s) at ₹${salePrice.toLocaleString()}.`
+        });
+      });
+    },
+    addBasicPremiumPayment: async (data: NewPaymentData) => {
+      if (!db || !user) return;
+      const newPayment = {
+        ...data,
+        srNo: getNextSrNo(basicPremiumPayments),
+        paymentDate: Timestamp.fromDate(data.paymentDate),
+        createdBy: user.uid,
+      };
+      await addDoc(collection(db, 'basicPremiumPayments'), newPayment).then(() => {
+        addActivity({
+          employeeName: user.displayName || user.email || 'User',
+          action: 'Recorded Basic/Premium Payment',
+          description: `Paid ₹${data.amount.toLocaleString()} to ${data.vendorName}.`
+        });
+      });
+    },
+    addBasicPremiumVendor: async (name: string) => {
+      if (!db || !user || !name.trim()) return;
+      const trimmedName = name.trim();
+      if (basicPremiumVendors.some(v => v.name.toLowerCase() === trimmedName.toLowerCase())) return;
+      await addDoc(collection(db, 'basicPremiumVendors'), {
+        name: trimmedName,
+        createdAt: serverTimestamp(),
+        createdBy: user.uid
+      });
+    },
+    updateBasicPremiumVendor: async (id: string, newName: string) => {
+      if (!db || !user || role !== 'admin') return;
+      await updateDoc(doc(db, 'basicPremiumVendors', id), { name: newName.trim() });
+    },
+    deleteBasicPremiumVendor: async (id: string) => {
+      if (!db || !user || role !== 'admin') return;
+      await deleteDoc(doc(db, 'basicPremiumVendors', id));
+    },
+    basicNumbersLoading,
+    premiumNumbersLoading,
+    basicPremiumVendorsLoading,
+    basicPremiumSalesLoading,
+    basicPremiumDeletesLoading,
+    basicPremiumPaymentsLoading,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
