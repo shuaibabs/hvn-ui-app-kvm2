@@ -88,9 +88,14 @@ export default function BasicPremiumPage() {
   }, [allPurchasedRecords, basicPremiumPayments]);
 
   const { totalBilled, totalPaid, amountRemaining } = useMemo(() => {
+    const soldPurchases = basicPremiumSales.map(s => ({
+      vendorName: s.dealerName || 'Unknown',
+      purchasePrice: Number(s.purchasePrice) || 0,
+    }));
+
     const relevantPurchases = vendorFilter === 'all'
-      ? allPurchasedRecords
-      : allPurchasedRecords.filter(p => p.vendorName === vendorFilter);
+      ? soldPurchases
+      : soldPurchases.filter(p => p.vendorName === vendorFilter);
 
     const totalBilled = relevantPurchases.reduce((sum, p) => sum + p.purchasePrice, 0);
     
@@ -107,7 +112,7 @@ export default function BasicPremiumPage() {
       totalPaid,
       amountRemaining: totalBilled - totalPaid
     };
-  }, [allPurchasedRecords, basicPremiumPayments, vendorFilter]);
+  }, [basicPremiumSales, allPurchasedRecords, basicPremiumPayments, vendorFilter]);
 
   const sortedData = useMemo(() => {
     let items: any[] = [];
@@ -328,7 +333,7 @@ export default function BasicPremiumPage() {
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-blue-600 dark:text-blue-400">Total Billed</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">₹{totalBilled.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">Total cost of all purchases</p>
+            <p className="text-xs text-muted-foreground mt-1">Total cost of sold numbers</p>
           </CardContent>
         </Card>
         <Card className="lg:col-span-1 bg-green-50 dark:bg-green-900/10 border-green-100 dark:border-green-900/20">

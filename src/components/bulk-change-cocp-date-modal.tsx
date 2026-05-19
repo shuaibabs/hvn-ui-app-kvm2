@@ -30,7 +30,7 @@ type ReviewResult = {
 };
 
 export function BulkChangeCocpDateModal({ isOpen, onClose }: BulkChangeCocpDateModalProps) {
-  const { numbers, bulkUpdateSafeCustodyDate, bulkUpdateUnsafeCustodyDate } = useApp();
+  const { numbers, preBookings, bulkUpdateSafeCustodyDate, bulkUpdateUnsafeCustodyDate } = useApp();
   const [inputText, setInputText] = useState('');
   const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -52,7 +52,12 @@ export function BulkChangeCocpDateModal({ isOpen, onClose }: BulkChangeCocpDateM
     const notFound: string[] = [];
     const notCocp: string[] = [];
 
-    const masterNumbersMap = new Map(numbers.map(n => [n.mobile, { id: n.id, type: n.numberType }]));
+    const fromInventory = numbers.map(n => [n.mobile, { id: n.id, type: n.numberType }] as [string, { id: string; type: string }]);
+    const fromPreBooking = preBookings
+      .filter(pb => pb.mobile)
+      .map(pb => [pb.mobile, { id: pb.id, type: pb.originalNumberData?.numberType }] as [string, { id: string; type: string }]);
+
+    const masterNumbersMap = new Map([...fromInventory, ...fromPreBooking]);
 
     uniqueInputNumbers.forEach(mobile => {
       const numberInfo = masterNumbersMap.get(mobile);

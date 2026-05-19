@@ -12,7 +12,7 @@ import { Pagination } from '@/components/pagination';
 import { TableSpinner } from '@/components/ui/spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SaleRecord } from '@/lib/data';
-import { format } from 'date-fns';
+import { format, getWeek } from 'date-fns';
 import Papa from 'papaparse';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
@@ -41,7 +41,10 @@ export default function ManageSalesPage() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [selectedWeek, setSelectedWeek] = useState<string>('all');
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
 
   const soldToOptions = useMemo(() => {
     const allVendors = sales.map(s => s.soldTo).filter(Boolean);
@@ -53,12 +56,25 @@ export default function ManageSalesPage() {
       const saleDate = sale.saleDate.toDate();
       const monthMatch = selectedMonth === 'all' || (saleDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || saleDate.getFullYear().toString() === selectedYear;
+      const weekMatch = selectedWeek === 'all' || getWeek(saleDate).toString() === selectedWeek;
       const vendorMatch = soldToFilter === 'all' || sale.soldTo === soldToFilter;
       const searchMatch = !searchTerm || (sale.mobile && sale.mobile.toLowerCase().includes(searchTerm.toLowerCase()));
       
-      return monthMatch && yearMatch && vendorMatch && searchMatch;
+      let dateRangeMatch = true;
+      if (fromDate) {
+        const from = new Date(fromDate);
+        from.setHours(0, 0, 0, 0);
+        if (saleDate < from) dateRangeMatch = false;
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        to.setHours(23, 59, 59, 999);
+        if (saleDate > to) dateRangeMatch = false;
+      }
+
+      return monthMatch && yearMatch && weekMatch && vendorMatch && searchMatch && dateRangeMatch;
     });
-  }, [sales, soldToFilter, searchTerm, selectedMonth, selectedYear]);
+  }, [sales, soldToFilter, searchTerm, selectedMonth, selectedWeek, selectedYear, fromDate, toDate]);
 
   const { totalPurchaseAmount, totalSaleAmount } = useMemo(() => {
     return filteredSales.reduce((acc, sale) => {
@@ -74,13 +90,27 @@ export default function ManageSalesPage() {
       const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
       const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
-      return vendorMatch && monthMatch && yearMatch;
+      const weekMatch = selectedWeek === 'all' || getWeek(pDate).toString() === selectedWeek;
+
+      let dateRangeMatch = true;
+      if (fromDate) {
+        const from = new Date(fromDate);
+        from.setHours(0, 0, 0, 0);
+        if (pDate < from) dateRangeMatch = false;
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        to.setHours(23, 59, 59, 999);
+        if (pDate > to) dateRangeMatch = false;
+      }
+
+      return vendorMatch && monthMatch && yearMatch && weekMatch && dateRangeMatch;
     });
 
     const paid = relevantPayments.reduce((sum, p) => sum + p.amount, 0);
 
     return { totalPaid: paid, amountRemaining: totalSaleAmount - paid };
-  }, [salesPayments, soldToFilter, totalSaleAmount, selectedMonth, selectedYear]);
+  }, [salesPayments, soldToFilter, totalSaleAmount, selectedMonth, selectedWeek, selectedYear, fromDate, toDate]);
 
   const totalProfitLoss = totalSaleAmount - totalPurchaseAmount;
 
@@ -219,7 +249,15 @@ export default function ManageSalesPage() {
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text(`Generated on: ${format(new Date(), 'PPP p')}`, 14, 28);
-    doc.text(`Filter: ${soldToFilter === 'all' ? 'All Vendors' : soldToFilter} | Period: ${selectedMonth === 'all' ? 'All Months' : format(new Date(2024, parseInt(selectedMonth)-1), 'MMMM')} ${selectedYear}`, 14, 34);
+    let periodText = `Period: `;
+    if (fromDate || toDate) {
+      periodText += `${fromDate || 'Start'} to ${toDate || 'End'}`;
+    } else {
+      periodText += `${selectedMonth === 'all' ? 'All Months' : format(new Date(2024, parseInt(selectedMonth)-1), 'MMMM')}`;
+      if (selectedWeek !== 'all') periodText += ` (Week ${selectedWeek})`;
+      periodText += ` ${selectedYear}`;
+    }
+    doc.text(`Filter: ${soldToFilter === 'all' ? 'All Vendors' : soldToFilter} | ${periodText}`, 14, 34);
 
     // Summary Section
     doc.setDrawColor(200);
@@ -272,7 +310,21 @@ export default function ManageSalesPage() {
       const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
       const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
-      return vendorMatch && monthMatch && yearMatch;
+      const weekMatch = selectedWeek === 'all' || getWeek(pDate).toString() === selectedWeek;
+
+      let dateRangeMatch = true;
+      if (fromDate) {
+        const from = new Date(fromDate);
+        from.setHours(0, 0, 0, 0);
+        if (pDate < from) dateRangeMatch = false;
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        to.setHours(23, 59, 59, 999);
+        if (pDate > to) dateRangeMatch = false;
+      }
+
+      return vendorMatch && monthMatch && yearMatch && weekMatch && dateRangeMatch;
     }).sort((a, b) => b.paymentDate.toDate().getTime() - a.paymentDate.toDate().getTime());
 
     const paymentColumn = ["Date", "Amount", "Notes"];
@@ -426,6 +478,20 @@ export default function ManageSalesPage() {
             </SelectContent>
           </Select>
 
+          <Select value={selectedWeek} onValueChange={setSelectedWeek}>
+            <SelectTrigger className="w-[120px]">
+              <SelectValue placeholder="Week" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Weeks</SelectItem>
+              {Array.from({ length: 53 }, (_, i) => (
+                <SelectItem key={i + 1} value={(i + 1).toString()}>
+                  Week {i + 1}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Select value={selectedYear} onValueChange={setSelectedYear}>
             <SelectTrigger className="w-[100px]">
               <SelectValue placeholder="Year" />
@@ -437,6 +503,50 @@ export default function ManageSalesPage() {
               ))}
             </SelectContent>
           </Select>
+
+          <div className="flex items-center gap-2 border rounded-md px-2 py-1 bg-background">
+            <span className="text-xs text-muted-foreground shrink-0">From:</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="bg-transparent border-none text-xs focus:outline-none dark:color-scheme-dark"
+            />
+            <span className="text-xs text-muted-foreground shrink-0 ml-1">To:</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="bg-transparent border-none text-xs focus:outline-none dark:color-scheme-dark"
+            />
+          </div>
+
+          {(selectedMonth !== 'all' || selectedWeek !== 'all' || selectedYear !== 'all' || fromDate || toDate || soldToFilter !== 'all' || searchTerm) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSelectedMonth('all');
+                setSelectedWeek('all');
+                setSelectedYear('all');
+                setFromDate('');
+                setToDate('');
+                setSoldToFilter('all');
+                setSearchTerm('');
+                setCurrentPage(1);
+              }}
+              className="h-9 px-3 text-xs"
+            >
+              Reset Filters
+            </Button>
+          )}
+
           <Select value={String(itemsPerPage)} onValueChange={handleItemsPerPageChange}>
             <SelectTrigger className="w-full sm:w-[120px]">
               <SelectValue placeholder="Items per page" />
