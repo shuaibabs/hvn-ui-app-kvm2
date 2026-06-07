@@ -12,7 +12,7 @@ import { Pagination } from '@/components/pagination';
 import { TableSpinner } from '@/components/ui/spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SaleRecord } from '@/lib/data';
-import { format, getWeek } from 'date-fns';
+import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
 import Papa from 'papaparse';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
@@ -87,6 +87,32 @@ export default function ManageSalesPage() {
     return weeks;
   }, [selectedMonth, selectedYear]);
 
+  // The statement period (start/end) derived from the active filters. Used to split
+  // transactions into Past (before) / Period (in range) / Future (after) for the export.
+  const periodBounds = useMemo<{ start: Date | null; end: Date | null }>(() => {
+    if (fromDate || toDate) {
+      return {
+        start: fromDate ? startOfDay(new Date(fromDate)) : null,
+        end: toDate ? endOfDay(new Date(toDate)) : null,
+      };
+    }
+    if (selectedYear !== 'all') {
+      const y = parseInt(selectedYear);
+      if (selectedMonth !== 'all') {
+        const m = parseInt(selectedMonth) - 1;
+        if (selectedWeek !== 'all') {
+          const w = availableWeeks.find(w => w.id === selectedWeek);
+          if (w) return { start: startOfDay(w.start), end: endOfDay(w.end) };
+        }
+        const ref = new Date(y, m, 1);
+        return { start: startOfMonth(ref), end: endOfMonth(ref) };
+      }
+      const refY = new Date(y, 0, 1);
+      return { start: startOfYear(refY), end: endOfYear(refY) };
+    }
+    return { start: null, end: null };
+  }, [fromDate, toDate, selectedYear, selectedMonth, selectedWeek, availableWeeks]);
+
   const filteredSales = useMemo(() => {
     return sales.filter(sale => {
       const saleDate = sale.saleDate.toDate();
@@ -140,24 +166,26 @@ export default function ManageSalesPage() {
     }, { totalPurchaseAmount: 0, totalSaleAmount: 0 });
   }, [filteredSales]);
 
-  const { totalPaid, amountRemaining } = useMemo(() => {
-    const relevantPayments = salesPayments.filter(p => {
+  // Payments that fall within the active filter (vendor + period). Reused by the
+  // summary cards and the export statement builder.
+  const periodPayments = useMemo(() => {
+    return salesPayments.filter(p => {
       const pDate = p.paymentDate.toDate();
       const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
       const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
       const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
-      
+
       let weekMatch = true;
       if (selectedWeek !== 'all') {
         if (availableWeeks.length > 0) {
           const selectedWeekData = availableWeeks.find(w => w.id === selectedWeek);
           if (selectedWeekData) {
             const pDateObj = new Date(pDate);
-            pDateObj.setHours(0,0,0,0);
+            pDateObj.setHours(0, 0, 0, 0);
             const wStart = new Date(selectedWeekData.start);
-            wStart.setHours(0,0,0,0);
+            wStart.setHours(0, 0, 0, 0);
             const wEnd = new Date(selectedWeekData.end);
-            wEnd.setHours(23,59,59,999);
+            wEnd.setHours(23, 59, 59, 999);
             weekMatch = pDateObj >= wStart && pDateObj <= wEnd;
           } else {
             weekMatch = false;
@@ -181,13 +209,64 @@ export default function ManageSalesPage() {
 
       return vendorMatch && monthMatch && yearMatch && weekMatch && dateRangeMatch;
     });
+  }, [salesPayments, soldToFilter, selectedMonth, selectedWeek, selectedYear, fromDate, toDate, availableWeeks]);
 
-    const paid = relevantPayments.reduce((sum, p) => sum + p.amount, 0);
-
-    return { totalPaid: paid, amountRemaining: totalSaleAmount - paid };
-  }, [salesPayments, soldToFilter, totalSaleAmount, selectedMonth, selectedWeek, selectedYear, fromDate, toDate, availableWeeks]);
+  const totalPaid = useMemo(() => periodPayments.reduce((sum, p) => sum + p.amount, 0), [periodPayments]);
+  const amountRemaining = totalSaleAmount - totalPaid;
 
   const totalProfitLoss = totalSaleAmount - totalPurchaseAmount;
+
+  // Full account statement for export: vendor (+search) scoped sales/payments split into
+  // Past / Selected-Period / Future buckets, with opening, closing and all-time balances.
+  const statement = useMemo(() => {
+    const { start, end } = periodBounds;
+    const hasPeriod = !!(start || end);
+
+    const scopedSales = sales.filter(s => {
+      const vendorMatch = soldToFilter === 'all' || s.soldTo === soldToFilter;
+      const searchMatch = !searchTerm || (s.mobile && s.mobile.toLowerCase().includes(searchTerm.toLowerCase()));
+      return vendorMatch && searchMatch;
+    });
+    const scopedPayments = salesPayments.filter(p => soldToFilter === 'all' || p.vendorName === soldToFilter);
+
+    const before = (d: Date) => !!start && d < start;
+    const after = (d: Date) => !!end && d > end;
+
+    const pastSales = hasPeriod ? scopedSales.filter(s => before(s.saleDate.toDate())) : [];
+    const futureSales = hasPeriod ? scopedSales.filter(s => after(s.saleDate.toDate())) : [];
+    const periodSales = filteredSales; // already vendor + period + search filtered
+
+    const pastPayments = hasPeriod ? scopedPayments.filter(p => before(p.paymentDate.toDate())) : [];
+    const futurePayments = hasPeriod ? scopedPayments.filter(p => after(p.paymentDate.toDate())) : [];
+
+    const sumBill = (arr: SaleRecord[]) => arr.reduce((s, x) => s + (x.salePrice || 0), 0);
+    const sumPay = (arr: typeof scopedPayments) => arr.reduce((s, x) => s + (x.amount || 0), 0);
+
+    const openingBilled = sumBill(pastSales);
+    const openingPaid = sumPay(pastPayments);
+    const openingPending = openingBilled - openingPaid;
+    const periodBilled = totalSaleAmount;
+    const periodPaid = totalPaid;
+    const periodPending = periodBilled - periodPaid;
+    const closingPending = openingPending + periodPending;
+    const futureBilled = sumBill(futureSales);
+    const futurePaid = sumPay(futurePayments);
+    // Grand totals are true all-time figures for the scope (independent of how the
+    // period buckets partition), so they stay correct for every filter combination.
+    const grandBilled = sumBill(scopedSales);
+    const grandPaid = sumPay(scopedPayments);
+    const grandPending = grandBilled - grandPaid;
+
+    return {
+      hasPeriod, start, end,
+      pastSales, periodSales, futureSales,
+      pastPayments, periodPayments, futurePayments,
+      openingBilled, openingPaid, openingPending,
+      periodBilled, periodPaid, periodPending,
+      closingPending, futureBilled, futurePaid,
+      grandBilled, grandPaid, grandPending,
+    };
+  }, [sales, salesPayments, soldToFilter, searchTerm, periodBounds, filteredSales, periodPayments, totalSaleAmount, totalPaid]);
 
   const totalPages = Math.ceil(filteredSales.length / itemsPerPage);
   const paginatedSales = filteredSales.slice(
@@ -235,8 +314,20 @@ export default function ManageSalesPage() {
   };
 
 
+  const buildPeriodLabel = () => {
+    if (fromDate || toDate) return `${fromDate || 'Start'} to ${toDate || 'End'}`;
+    const monthPart = selectedMonth === 'all' ? 'All Months' : format(new Date(2024, parseInt(selectedMonth) - 1), 'MMMM');
+    const weekPart = selectedWeek !== 'all' ? ` (Week ${selectedWeek})` : '';
+    const yearPart = selectedYear === 'all' ? '' : ` ${selectedYear}`;
+    return `${monthPart}${weekPart}${yearPart}`.trim();
+  };
+
   const exportToCsv = () => {
-    if (filteredSales.length === 0) {
+    const st = statement;
+    const totalRows =
+      st.periodSales.length + st.pastSales.length + st.futureSales.length +
+      st.periodPayments.length + st.pastPayments.length + st.futurePayments.length;
+    if (totalRows === 0) {
       toast({
         variant: "destructive",
         title: "No data to export",
@@ -245,48 +336,73 @@ export default function ManageSalesPage() {
       return;
     }
 
-    const summaryData = [
-      ['Sales Report For', soldToFilter === 'all' ? 'All Vendors' : soldToFilter],
-      [''], // Empty row for spacing
-      ['Total Billed', totalSaleAmount],
-      ['Total Purchase Amount', totalPurchaseAmount],
-      ['Profit / Loss', totalProfitLoss],
-      [''], // Empty row for spacing
-    ];
-
-    const recordsHeader = [
-      "Sr.No", "Mobile", "Sum", "Purchase From", "Purchase Price", "Purchase Date", "Sold To", "Sale Price", "Sale Date", "Remark", "Reason of Sales"
-    ];
-
-    const sortedRecordsForExport = [...filteredSales].sort((a, b) =>
-      b.saleDate.toDate().getTime() - a.saleDate.toDate().getTime()
-    );
-
-    const recordsData = sortedRecordsForExport.map(s => ([
-      s.srNo,
-      s.mobile,
-      s.sum,
+    const salesHeader = ["Sr.No", "Mobile", "Sum", "Purchase From", "Purchase Price", "Purchase Date", "Sold To", "Sale Price", "Sale Date", "Remark", "Reason of Sales"];
+    const payHeader = ["Date", "Vendor", "Amount", "Notes"];
+    const sortS = (arr: SaleRecord[]) => [...arr].sort((a, b) => b.saleDate.toDate().getTime() - a.saleDate.toDate().getTime());
+    const sortP = (arr: typeof st.periodPayments) => [...arr].sort((a, b) => b.paymentDate.toDate().getTime() - a.paymentDate.toDate().getTime());
+    const saleRow = (s: SaleRecord, i: number) => [
+      i + 1, s.mobile, s.sum,
       s.originalNumberData?.purchaseFrom || 'N/A',
       s.originalNumberData?.purchasePrice || 0,
       s.originalNumberData?.purchaseDate ? format(s.originalNumberData.purchaseDate.toDate(), 'dd-MM-yyyy') : 'N/A',
-      s.soldTo,
-      s.salePrice,
-      format(s.saleDate.toDate(), 'dd-MM-yyyy'),
-      s.remark || '',
-      s.saleReason || '',
-    ]));
+      s.soldTo, s.salePrice, format(s.saleDate.toDate(), 'dd-MM-yyyy'),
+      s.remark || '', s.saleReason || '',
+    ];
+    const payRow = (p: typeof st.periodPayments[number]) => [
+      format(p.paymentDate.toDate(), 'dd-MM-yyyy'), p.vendorName, p.amount, p.notes || '',
+    ];
 
-    const csvData = [...summaryData, recordsHeader, ...recordsData];
+    const rows: (string | number)[][] = [];
+    rows.push(['Sales Account Statement']);
+    rows.push(['Scope', soldToFilter === 'all' ? 'All Vendors' : soldToFilter]);
+    rows.push(['Period', buildPeriodLabel()]);
+    rows.push(['Generated', format(new Date(), 'dd-MM-yyyy HH:mm')]);
+    rows.push([]);
 
-    const csv = Papa.unparse(csvData, {
-      header: false // We are providing our own headers
-    });
+    rows.push(['BALANCE SUMMARY']);
+    if (st.hasPeriod) {
+      rows.push(['Opening Balance (Pending b/f)', st.openingPending]);
+      rows.push(['  Billed before period', st.openingBilled]);
+      rows.push(['  Paid before period', st.openingPaid]);
+    }
+    rows.push(['Period - Total Billed', st.periodBilled]);
+    rows.push(['Period - Total Paid', st.periodPaid]);
+    rows.push(['Period - Pending', st.periodPending]);
+    rows.push(['Period - Total Purchase', totalPurchaseAmount]);
+    rows.push(['Period - Profit / Loss', totalProfitLoss]);
+    if (st.hasPeriod) rows.push(['Closing Balance (Pending as of period end)', st.closingPending]);
+    if (st.futureBilled || st.futurePaid) {
+      rows.push(['After Period - Billed', st.futureBilled]);
+      rows.push(['After Period - Paid', st.futurePaid]);
+    }
+    rows.push(['Grand Total - Billed (All Time)', st.grandBilled]);
+    rows.push(['Grand Total - Paid (All Time)', st.grandPaid]);
+    rows.push(['Grand Total - Pending (All Time)', st.grandPending]);
+    rows.push([]);
+
+    const pushSection = (title: string, header: string[], builder: () => (string | number)[][]) => {
+      rows.push([title]);
+      rows.push(header);
+      const body = builder();
+      if (body.length) body.forEach(r => rows.push(r));
+      else rows.push(['(none)']);
+      rows.push([]);
+    };
+
+    pushSection('SELECTED PERIOD - SALES', salesHeader, () => sortS(st.periodSales).map(saleRow));
+    pushSection('SELECTED PERIOD - PAYMENTS', payHeader, () => sortP(st.periodPayments).map(payRow));
+    if (st.pastSales.length) pushSection('PAST HISTORY - SALES (before period)', salesHeader, () => sortS(st.pastSales).map(saleRow));
+    if (st.pastPayments.length) pushSection('PAST HISTORY - PAYMENTS (before period)', payHeader, () => sortP(st.pastPayments).map(payRow));
+    if (st.futureSales.length) pushSection('FUTURE - SALES (after period)', salesHeader, () => sortS(st.futureSales).map(saleRow));
+    if (st.futurePayments.length) pushSection('FUTURE - PAYMENTS (after period)', payHeader, () => sortP(st.futurePayments).map(payRow));
+
+    const csv = Papa.unparse(rows, { header: false });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `sales_report_${soldToFilter}.csv`);
+    link.setAttribute('download', `sales_statement_${soldToFilter}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -294,18 +410,22 @@ export default function ManageSalesPage() {
 
     addActivity({
       employeeName: user?.displayName || 'User',
-      action: 'Exported Sales Report',
-      description: `Exported ${filteredSales.length} sales records for filter: ${soldToFilter}.`
+      action: 'Exported Sales Statement (CSV)',
+      description: `Exported full sales statement for "${soldToFilter}" (period: ${buildPeriodLabel()}).`
     });
 
     toast({
       title: "Export Successful",
-      description: `Sales report for "${soldToFilter}" has been downloaded.`,
+      description: `Sales statement for "${soldToFilter}" has been downloaded.`,
     });
   };
 
   const exportToPdf = () => {
-    if (filteredSales.length === 0) {
+    const st = statement;
+    const totalRows =
+      st.periodSales.length + st.pastSales.length + st.futureSales.length +
+      st.periodPayments.length + st.pastPayments.length + st.futurePayments.length;
+    if (totalRows === 0) {
       toast({
         variant: "destructive",
         title: "No data to export",
@@ -314,142 +434,93 @@ export default function ManageSalesPage() {
       return;
     }
 
+    const inr = (n: number) => `INR ${n.toLocaleString()}`;
     const doc = new jsPDF('l', 'mm', 'a4'); // Landscape for more columns
-    
+
     // Header
-    doc.setFontSize(22);
+    doc.setFontSize(20);
     doc.setTextColor(41, 128, 185);
-    doc.text("HVN MANAGE SALES REPORT", 14, 20);
-    
+    doc.text("HVN SALES ACCOUNT STATEMENT", 14, 18);
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Generated on: ${format(new Date(), 'PPP p')}`, 14, 28);
-    let periodText = `Period: `;
-    if (fromDate || toDate) {
-      periodText += `${fromDate || 'Start'} to ${toDate || 'End'}`;
-    } else {
-      periodText += `${selectedMonth === 'all' ? 'All Months' : format(new Date(2024, parseInt(selectedMonth)-1), 'MMMM')}`;
-      if (selectedWeek !== 'all') periodText += ` (Week ${selectedWeek})`;
-      periodText += ` ${selectedYear}`;
+    doc.text(`Generated on: ${format(new Date(), 'PPP p')}`, 14, 25);
+    doc.text(`Vendor: ${soldToFilter === 'all' ? 'All Vendors' : soldToFilter}   |   Period: ${buildPeriodLabel()}`, 14, 31);
+
+    // Balance summary table
+    const summaryBody: (string | number)[][] = [];
+    if (st.hasPeriod) summaryBody.push(['Opening Balance (Pending b/f)', inr(st.openingPending)]);
+    summaryBody.push(['Period - Total Billed', inr(st.periodBilled)]);
+    summaryBody.push(['Period - Total Paid', inr(st.periodPaid)]);
+    summaryBody.push(['Period - Pending', inr(st.periodPending)]);
+    summaryBody.push(['Period - Profit / Loss', inr(totalProfitLoss)]);
+    if (st.hasPeriod) summaryBody.push(['Closing Balance (Pending @ period end)', inr(st.closingPending)]);
+    if (st.futureBilled || st.futurePaid) {
+      summaryBody.push(['After Period - Billed', inr(st.futureBilled)]);
+      summaryBody.push(['After Period - Paid', inr(st.futurePaid)]);
     }
-    doc.text(`Filter: ${soldToFilter === 'all' ? 'All Vendors' : soldToFilter} | ${periodText}`, 14, 34);
-
-    // Summary Section
-    doc.setDrawColor(200);
-    doc.line(14, 38, 283, 38);
-    
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-    doc.text(`Total Records: ${filteredSales.length}`, 14, 45);
-    doc.text(`Total Billed: INR ${totalSaleAmount.toLocaleString()}`, 70, 45);
-    doc.text(`Total Paid: INR ${totalPaid.toLocaleString()}`, 130, 45);
-    doc.text(`Remaining: INR ${amountRemaining.toLocaleString()}`, 190, 45);
-
-    const tableColumn = ["Sr.No", "Mobile", "Sum", "Sold To", "Sale Price", "Sale Date", "Reason of Sales"];
-    
-    const sortedRecords = [...filteredSales].sort((a, b) => 
-      b.saleDate.toDate().getTime() - a.saleDate.toDate().getTime()
-    );
-
-    const tableRows = sortedRecords.map((s, index) => [
-      index + 1,
-      s.mobile,
-      s.sum,
-      s.soldTo,
-      `INR ${s.salePrice.toLocaleString()}`,
-      format(s.saleDate.toDate(), 'dd-MM-yyyy'),
-      s.saleReason || '-'
-    ]);
+    summaryBody.push(['Grand Total - Billed (All Time)', inr(st.grandBilled)]);
+    summaryBody.push(['Grand Total - Paid (All Time)', inr(st.grandPaid)]);
+    summaryBody.push(['Grand Total - Pending (All Time)', inr(st.grandPending)]);
 
     autoTable(doc, {
-      head: [tableColumn],
-      body: tableRows,
-      startY: 55,
-      styles: { fontSize: 8, cellPadding: 2 },
+      startY: 36,
+      head: [['Balance Summary', 'Amount']],
+      body: summaryBody,
+      theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 1.5 },
       headStyles: { fillColor: [41, 128, 185], textColor: 255 },
-      alternateRowStyles: { fillColor: [245, 245, 245] },
-      margin: { top: 55 }
+      columnStyles: { 0: { cellWidth: 120 }, 1: { cellWidth: 60, halign: 'right' } },
+      margin: { left: 14 },
     });
 
-    // Payment History Section
-    const finalY = (doc as any).lastAutoTable.finalY || 55;
-    
-    if (finalY > 240) doc.addPage();
-
-    doc.setFontSize(14);
-    doc.setTextColor(41, 128, 185);
-    doc.text("PAYMENT HISTORY", 14, finalY + 15);
-
-    const relevantPayments = salesPayments.filter(p => {
-      const pDate = p.paymentDate.toDate();
-      const vendorMatch = soldToFilter === 'all' || p.vendorName === soldToFilter;
-      const monthMatch = selectedMonth === 'all' || (pDate.getMonth() + 1).toString() === selectedMonth;
-      const yearMatch = selectedYear === 'all' || pDate.getFullYear().toString() === selectedYear;
-      
-      let weekMatch = true;
-      if (selectedWeek !== 'all') {
-        if (availableWeeks.length > 0) {
-          const selectedWeekData = availableWeeks.find(w => w.id === selectedWeek);
-          if (selectedWeekData) {
-            const pDateObj = new Date(pDate);
-            pDateObj.setHours(0,0,0,0);
-            const wStart = new Date(selectedWeekData.start);
-            wStart.setHours(0,0,0,0);
-            const wEnd = new Date(selectedWeekData.end);
-            wEnd.setHours(23,59,59,999);
-            weekMatch = pDateObj >= wStart && pDateObj <= wEnd;
-          } else {
-            weekMatch = false;
-          }
-        } else {
-          weekMatch = false;
-        }
-      }
-
-      let dateRangeMatch = true;
-      if (fromDate) {
-        const from = new Date(fromDate);
-        from.setHours(0, 0, 0, 0);
-        if (pDate < from) dateRangeMatch = false;
-      }
-      if (toDate) {
-        const to = new Date(toDate);
-        to.setHours(23, 59, 59, 999);
-        if (pDate > to) dateRangeMatch = false;
-      }
-
-      return vendorMatch && monthMatch && yearMatch && weekMatch && dateRangeMatch;
-    }).sort((a, b) => b.paymentDate.toDate().getTime() - a.paymentDate.toDate().getTime());
-
-    const paymentColumn = ["Date", "Amount", "Notes"];
-    const paymentRows = relevantPayments.map(p => [
-      format(p.paymentDate.toDate(), 'dd-MM-yyyy'),
-      `INR ${p.amount.toLocaleString()}`,
-      p.notes || '-'
+    const saleCols = ["#", "Mobile", "Sum", "Sold To", "Sale Price", "Sale Date", "Reason"];
+    const payCols = ["Date", "Vendor", "Amount", "Notes"];
+    const sortS = (arr: SaleRecord[]) => [...arr].sort((a, b) => b.saleDate.toDate().getTime() - a.saleDate.toDate().getTime());
+    const sortP = (arr: typeof st.periodPayments) => [...arr].sort((a, b) => b.paymentDate.toDate().getTime() - a.paymentDate.toDate().getTime());
+    const saleBody = (arr: SaleRecord[]) => sortS(arr).map((s, i) => [
+      i + 1, s.mobile, s.sum, s.soldTo, inr(s.salePrice), format(s.saleDate.toDate(), 'dd-MM-yyyy'), s.saleReason || '-'
+    ]);
+    const payBody = (arr: typeof st.periodPayments) => sortP(arr).map(p => [
+      format(p.paymentDate.toDate(), 'dd-MM-yyyy'), p.vendorName, inr(p.amount), p.notes || '-'
     ]);
 
-    autoTable(doc, {
-      head: [paymentColumn],
-      body: paymentRows,
-      startY: finalY + 20,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [39, 174, 96], textColor: 255 },
-      alternateRowStyles: { fillColor: [245, 245, 245] },
-      margin: { top: 20 }
-    });
+    const addTable = (title: string, head: string[], body: (string | number)[][], color: [number, number, number]) => {
+      if (body.length === 0) return;
+      let y = ((doc as any).lastAutoTable?.finalY ?? 36) + 10;
+      if (y > 185) { doc.addPage(); y = 18; }
+      doc.setFontSize(12);
+      doc.setTextColor(color[0], color[1], color[2]);
+      doc.text(title, 14, y);
+      autoTable(doc, {
+        startY: y + 3,
+        head: [head],
+        body,
+        styles: { fontSize: 8, cellPadding: 1.5 },
+        headStyles: { fillColor: color, textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        margin: { left: 14 },
+      });
+    };
 
-    const fileName = `Sales_Report_${soldToFilter}_${selectedMonth}_${selectedYear}.pdf`;
+    addTable('Selected Period - Sales', saleCols, saleBody(st.periodSales), [41, 128, 185]);
+    addTable('Selected Period - Payments', payCols, payBody(st.periodPayments), [39, 174, 96]);
+    addTable('Past History - Sales (before period)', saleCols, saleBody(st.pastSales), [142, 68, 173]);
+    addTable('Past History - Payments (before period)', payCols, payBody(st.pastPayments), [142, 68, 173]);
+    addTable('Future - Sales (after period)', saleCols, saleBody(st.futureSales), [211, 84, 0]);
+    addTable('Future - Payments (after period)', payCols, payBody(st.futurePayments), [211, 84, 0]);
+
+    const fileName = `Sales_Statement_${soldToFilter}_${buildPeriodLabel().replace(/[^a-zA-Z0-9]+/g, '_')}.pdf`;
     doc.save(fileName);
 
     addActivity({
       employeeName: user?.displayName || 'User',
-      action: 'Exported PDF Sales Report',
-      description: `Exported ${filteredSales.length} sales records to PDF for: ${soldToFilter}.`
+      action: 'Exported PDF Sales Statement',
+      description: `Exported full sales statement (PDF) for: ${soldToFilter} (period: ${buildPeriodLabel()}).`
     });
 
     toast({
       title: "PDF Export Successful",
-      description: `Sales report PDF has been downloaded.`,
+      description: `Sales statement PDF has been downloaded.`,
     });
   };
 

@@ -2,7 +2,13 @@
 
 import { useState, useMemo } from 'react';
 import { useApp } from '@/context/app-context';
-import { CATEGORIES, CategoryKey, CategoryDefinition } from '@/lib/vipNumberFilters';
+import {
+  CATEGORY_TAXONOMY,
+  matchesCategory,
+  matchesSubcategory,
+  type CategoryId,
+  type SubcategoryId,
+} from '@/lib/vipNumberCategories';
 import type { NumberRecord } from '@/lib/data';
 import { PageHeader } from '@/components/page-header';
 import { Input } from '@/components/ui/input';
@@ -10,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/pagination';
-import { Spinner, TableSpinner } from '@/components/ui/spinner';
+import { TableSpinner } from '@/components/ui/spinner';
 import { useAuth } from '@/context/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigation } from '@/context/navigation-context';
@@ -24,10 +30,8 @@ import {
   Copy,
   Bookmark,
   Edit,
-  Trash,
   X,
   Tags,
-  Search,
   ExternalLink
 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -35,10 +39,9 @@ import { RtpStatusModal } from '@/components/rts-status-modal';
 import { EditUploadStatusModal } from '@/components/edit-upload-status-modal';
 import { SellNumberModal } from '@/components/sell-number-modal';
 import { EditLocationModal } from '@/components/edit-location-modal';
-import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
 
 type SortableColumn = keyof NumberRecord | 'id' | 'twoDigitSum';
+type SubSelection = 'all' | SubcategoryId;
 
 export default function CategoriesPage() {
   const { numbers, loading, markAsPreBooked } = useApp();
@@ -46,8 +49,8 @@ export default function CategoriesPage() {
   const { navigate } = useNavigation();
   const { toast } = useToast();
 
-  const [categorySearch, setCategorySearch] = useState('');
-  const [selectedCategoryKey, setSelectedCategoryKey] = useState<CategoryKey | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<CategoryId | null>(null);
+  const [selectedSubId, setSelectedSubId] = useState<SubSelection>('all');
 
   // Number table filtering / pagination / sorting
   const [numberSearch, setNumberSearch] = useState('');
@@ -63,149 +66,102 @@ export default function CategoriesPage() {
   const [isSellModalOpen, setIsSellModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
-  const [selectedRowsForLocation, setSelectedRowsForLocation] = useState<string[]>([]);
 
-  // 1. Calculate live counts for each category
+  // 1. Live counts per category
   const categoryStats = useMemo(() => {
-    return CATEGORIES.map(cat => {
-      const matched = numbers.filter(num => cat.check(num.mobile));
-      return {
-        ...cat,
-        count: matched.length,
-        numbers: matched
-      };
-    });
+    return CATEGORY_TAXONOMY.map(cat => ({
+      ...cat,
+      count: numbers.filter(num => num.mobile && matchesCategory(num.mobile, cat.id)).length,
+    }));
   }, [numbers]);
 
-  // 2. Filter categories grid by search
-  const filteredCategories = useMemo(() => {
-    return categoryStats.filter(cat =>
-      cat.label.toLowerCase().includes(categorySearch.toLowerCase()) ||
-      cat.description.toLowerCase().includes(categorySearch.toLowerCase())
-    );
-  }, [categoryStats, categorySearch]);
+  const selectedCategory = useMemo(
+    () => (selectedCategoryId != null ? CATEGORY_TAXONOMY.find(c => c.id === selectedCategoryId) ?? null : null),
+    [selectedCategoryId]
+  );
 
-  const selectedCategoryInfo = useMemo(() => {
-    if (!selectedCategoryKey) return null;
-    return categoryStats.find(cat => cat.key === selectedCategoryKey) || null;
-  }, [categoryStats, selectedCategoryKey]);
+  // 3. Subcategories of the selected category, with live counts
+  const subStats = useMemo(() => {
+    if (!selectedCategory) return [];
+    return selectedCategory.subcategories.map(sub => ({
+      ...sub,
+      count: numbers.filter(num => num.mobile && matchesSubcategory(num.mobile, sub.id)).length,
+    }));
+  }, [selectedCategory, numbers]);
 
-  // 3. Simple Sum Helper
-  const calculateSimpleSum = (mobile: string): number => {
-    return mobile
-      .split('')
-      .map(Number)
-      .reduce((acc, digit) => acc + digit, 0);
-  };
+  const calculateSimpleSum = (mobile: string): number =>
+    mobile.split('').map(Number).reduce((acc, digit) => acc + (Number.isNaN(digit) ? 0 : digit), 0);
 
-  // 4. Sorted and Filtered Numbers matching the selected Category
+  // 4. Base set = numbers matching the selected category + subcategory
+  const baseNumbers = useMemo(() => {
+    if (selectedCategoryId == null) return [];
+    if (selectedSubId === 'all') return numbers.filter(num => num.mobile && matchesCategory(num.mobile, selectedCategoryId));
+    return numbers.filter(num => num.mobile && matchesSubcategory(num.mobile, selectedSubId));
+  }, [numbers, selectedCategoryId, selectedSubId]);
+
+  // 5. Apply table filters + sorting
   const sortedAndFilteredNumbers = useMemo(() => {
-    if (!selectedCategoryInfo) return [];
-
-    let items = [...selectedCategoryInfo.numbers]
+    let items = baseNumbers
       .filter(num =>
         (statusFilter === 'all' || num.status === statusFilter) &&
         (typeFilter === 'all' || num.numberType === typeFilter)
       )
-      .filter(num =>
-        num.mobile && num.mobile.toLowerCase().includes(numberSearch.toLowerCase())
-      );
+      .filter(num => num.mobile && num.mobile.toLowerCase().includes(numberSearch.toLowerCase()));
 
     if (sortConfig !== null) {
-      items.sort((a, b) => {
+      items = [...items].sort((a, b) => {
         const aValue = sortConfig.key === 'twoDigitSum' ? calculateSimpleSum(a.mobile) : a[sortConfig.key as keyof NumberRecord];
         const bValue = sortConfig.key === 'twoDigitSum' ? calculateSimpleSum(b.mobile) : b[sortConfig.key as keyof NumberRecord];
-
         if (aValue === null || aValue === undefined) return 1;
         if (bValue === null || bValue === undefined) return -1;
-
         let comparison = 0;
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          comparison = aValue.localeCompare(bValue);
-        } else if (aValue instanceof Date && bValue instanceof Date) {
-          comparison = aValue.getTime() - bValue.getTime();
-        } else {
-          if (aValue < bValue) comparison = -1;
-          if (aValue > bValue) comparison = 1;
-        }
-
+        if (typeof aValue === 'string' && typeof bValue === 'string') comparison = aValue.localeCompare(bValue);
+        else if (aValue instanceof Date && bValue instanceof Date) comparison = aValue.getTime() - bValue.getTime();
+        else { if (aValue < bValue) comparison = -1; if (aValue > bValue) comparison = 1; }
         return sortConfig.direction === 'ascending' ? comparison : -comparison;
       });
     }
-
     return items;
-  }, [selectedCategoryInfo, numberSearch, statusFilter, typeFilter, sortConfig]);
+  }, [baseNumbers, numberSearch, statusFilter, typeFilter, sortConfig]);
 
-  // 5. Pagination
+  // 6. Pagination
   const totalPages = Math.ceil(sortedAndFilteredNumbers.length / itemsPerPage);
-  const paginatedNumbers = useMemo(() => {
-    return sortedAndFilteredNumbers.slice(
-      (currentPage - 1) * itemsPerPage,
-      currentPage * itemsPerPage
-    );
-  }, [sortedAndFilteredNumbers, currentPage, itemsPerPage]);
+  const paginatedNumbers = useMemo(
+    () => sortedAndFilteredNumbers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [sortedAndFilteredNumbers, currentPage, itemsPerPage]
+  );
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
-
-  const handleItemsPerPageChange = (value: string) => {
-    setItemsPerPage(Number(value));
+  const selectCategory = (id: CategoryId | null) => {
+    setSelectedCategoryId(id);
+    setSelectedSubId('all');
+    setNumberSearch('');
     setCurrentPage(1);
   };
 
+  const handleItemsPerPageChange = (value: string) => { setItemsPerPage(Number(value)); setCurrentPage(1); };
+
   const requestSort = (key: SortableColumn) => {
     let direction: 'ascending' | 'descending' = 'ascending';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') direction = 'descending';
     setSortConfig({ key, direction });
     setCurrentPage(1);
   };
 
   const getSortIcon = (columnKey: SortableColumn) => {
-    if (!sortConfig || sortConfig.key !== columnKey) {
-      return <ArrowUpDown className="ml-2 h-4 w-4 opacity-30" />;
-    }
-    if (sortConfig.direction === 'ascending') {
-      return <ArrowUp className="ml-2 h-4 w-4" />;
-    }
-    return <ArrowDown className="ml-2 h-4 w-4" />;
+    if (!sortConfig || sortConfig.key !== columnKey) return <ArrowUpDown className="ml-2 h-4 w-4 opacity-30" />;
+    return sortConfig.direction === 'ascending' ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />;
   };
 
-  // Actions
-  const handleMarkRTP = (number: NumberRecord) => {
-    setSelectedNumber(number);
-    setIsRtpModalOpen(true);
-  };
-
-  const handleEditUpload = (number: NumberRecord) => {
-    setSelectedNumber(number);
-    setIsUploadModalOpen(true);
-  };
-
-  const handleSellNumber = (number: NumberRecord) => {
-    setSelectedNumber(number);
-    setIsSellModalOpen(true);
-  };
-
-  const handleEditLocation = (number: NumberRecord) => {
-    setSelectedRowsForLocation([number.id]);
-    setIsLocationModalOpen(true);
-  };
-
+  const handleMarkRTP = (number: NumberRecord) => { setSelectedNumber(number); setIsRtpModalOpen(true); };
+  const handleEditUpload = (number: NumberRecord) => { setSelectedNumber(number); setIsUploadModalOpen(true); };
+  const handleSellNumber = (number: NumberRecord) => { setSelectedNumber(number); setIsSellModalOpen(true); };
+  const handleEditLocation = (number: NumberRecord) => { setSelectedNumber(number); setIsLocationModalOpen(true); };
   const handlePreBook = (number: NumberRecord) => {
     markAsPreBooked([number.id]);
-    toast({
-      title: "Pre-booked number successfully",
-      description: `${number.mobile} moved to prebookings.`
-    });
+    toast({ title: 'Pre-booked number successfully', description: `${number.mobile} moved to prebookings.` });
   };
-
   const handleCopyNumber = (mobile: string) => {
-    navigator.clipboard.writeText(mobile).then(() => {
-      toast({ title: "Copied to clipboard!", description: mobile });
-    });
+    navigator.clipboard.writeText(mobile).then(() => toast({ title: 'Copied to clipboard!', description: mobile }));
   };
 
   const highlightMatch = (text: string, highlight: string) => {
@@ -214,13 +170,9 @@ export default function CategoriesPage() {
     return (
       <span>
         {parts.map((part, i) =>
-          part.toLowerCase() === highlight.toLowerCase() ? (
-            <span key={i} className="bg-yellow-300 dark:bg-yellow-700 rounded-sm">
-              {part}
-            </span>
-          ) : (
-            part
-          )
+          part.toLowerCase() === highlight.toLowerCase()
+            ? <span key={i} className="bg-yellow-300 dark:bg-yellow-700 rounded-sm">{part}</span>
+            : part
         )}
       </span>
     );
@@ -229,134 +181,91 @@ export default function CategoriesPage() {
   const SortableHeader = ({ column, label }: { column: SortableColumn, label: string }) => (
     <TableHead>
       <Button variant="ghost" onClick={() => requestSort(column)} className="px-0 hover:bg-transparent">
-        {label}
-        {getSortIcon(column)}
+        {label}{getSortIcon(column)}
       </Button>
     </TableHead>
   );
+
+  const subLabel = selectedSubId === 'all'
+    ? `All ${selectedCategory?.name ?? ''}`
+    : (selectedCategory?.subcategories.find(s => s.id === selectedSubId)?.name ?? '');
 
   return (
     <>
       <PageHeader
         title="VIP Numbers Categories"
-        description="Filter and find inventory based on NumberATM.com categories and mathematical patterns."
+        description="Filter inventory by Category → Subcategory, matching the vipnumbershop.com taxonomy."
       />
 
       <div className="space-y-6">
-        {/* Categories Search and Title */}
-        <div className="flex flex-col sm:flex-row items-center gap-4">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search category by name or pattern description..."
-              value={categorySearch}
-              onChange={(e) => setCategorySearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          {selectedCategoryKey && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSelectedCategoryKey(null);
-                setNumberSearch('');
-                setCurrentPage(1);
-              }}
-              className="w-full sm:w-auto"
+        {/* Category → Subcategory dropdowns */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-4 border rounded-lg bg-card shadow-sm">
+          <div className="flex-1">
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Category</label>
+            <Select
+              value={selectedCategoryId != null ? String(selectedCategoryId) : ''}
+              onValueChange={(v) => selectCategory(v ? Number(v) as CategoryId : null)}
             >
-              <X className="mr-2 h-4 w-4" /> Clear Selected Category
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select a category" /></SelectTrigger>
+              <SelectContent>
+                {categoryStats.map(cat => (
+                  <SelectItem key={cat.id} value={String(cat.id)}>{cat.name} ({cat.count})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1">
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Subcategory</label>
+            <Select
+              value={String(selectedSubId)}
+              onValueChange={(v) => { setSelectedSubId(v === 'all' ? 'all' : Number(v) as SubcategoryId); setCurrentPage(1); }}
+              disabled={selectedCategoryId == null}
+            >
+              <SelectTrigger className="w-full"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All {selectedCategory?.name ?? ''}</SelectItem>
+                {subStats.map(sub => (
+                  <SelectItem key={sub.id} value={String(sub.id)}>{sub.name} ({sub.count})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {selectedCategoryId != null && (
+            <Button variant="outline" onClick={() => selectCategory(null)} className="self-end">
+              <X className="mr-2 h-4 w-4" /> Clear
             </Button>
           )}
         </div>
 
-        {/* Categories Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-h-[360px] overflow-y-auto p-1 border rounded-lg bg-card shadow-sm">
-          {loading ? (
-            <div className="col-span-full py-12 flex justify-center items-center">
-              <Spinner className="h-8 w-8" />
-            </div>
-          ) : filteredCategories.length > 0 ? (
-            filteredCategories.map((cat) => {
-              const isSelected = selectedCategoryKey === cat.key;
-              return (
-                <div
-                  key={cat.key}
-                  onClick={() => {
-                    setSelectedCategoryKey(cat.key);
-                    setNumberSearch('');
-                    setCurrentPage(1);
-                  }}
-                  className={cn(
-                    "p-4 rounded-xl border cursor-pointer transition-all duration-200 select-none hover:shadow-md",
-                    isSelected
-                      ? "border-primary bg-primary/5 ring-1 ring-primary"
-                      : "border-border bg-card hover:bg-accent/40"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-semibold text-sm leading-tight line-clamp-1">{cat.label}</h3>
-                    <Badge variant={cat.count > 0 ? "default" : "secondary"} className="shrink-0">
-                      {cat.count}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2 h-8 leading-snug">
-                    {cat.description}
-                  </p>
-                </div>
-              );
-            })
-          ) : (
-            <div className="col-span-full py-8 text-center text-muted-foreground text-sm">
-              No categories match your search terms.
-            </div>
-          )}
-        </div>
-
-        {/* Selected Category Numbers Table */}
-        {selectedCategoryInfo && (
+        {/* Selected Category/Subcategory Numbers Table */}
+        {selectedCategory && (
           <div className="space-y-4 border-t pt-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold flex items-center gap-2">
                   <Tags className="h-5 w-5 text-primary" />
-                  Category: {selectedCategoryInfo.label}
+                  {selectedCategory.name} <span className="text-muted-foreground">›</span> {subLabel}
                 </h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  {selectedCategoryInfo.description}
-                </p>
+                <p className="text-sm text-muted-foreground mt-0.5">{sortedAndFilteredNumbers.length} matching number(s) in stock</p>
               </div>
 
-              {/* Filters inside category */}
               <div className="flex flex-wrap items-center gap-2">
                 <Input
                   placeholder="Filter numbers..."
                   value={numberSearch}
-                  onChange={(e) => {
-                    setNumberSearch(e.target.value);
-                    setCurrentPage(1);
-                  }}
+                  onChange={(e) => { setNumberSearch(e.target.value); setCurrentPage(1); }}
                   className="w-full sm:w-[200px]"
                 />
-                <Select value={statusFilter} onValueChange={(value) => {
-                  setStatusFilter(value);
-                  setCurrentPage(1);
-                }}>
-                  <SelectTrigger className="w-full sm:w-[130px]">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
+                <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setCurrentPage(1); }}>
+                  <SelectTrigger className="w-full sm:w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="RTP">RTP</SelectItem>
                     <SelectItem value="Non-RTP">Non-RTP</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={typeFilter} onValueChange={(value) => {
-                  setTypeFilter(value);
-                  setCurrentPage(1);
-                }}>
-                  <SelectTrigger className="w-full sm:w-[130px]">
-                    <SelectValue placeholder="Type" />
-                  </SelectTrigger>
+                <Select value={typeFilter} onValueChange={(value) => { setTypeFilter(value); setCurrentPage(1); }}>
+                  <SelectTrigger className="w-full sm:w-[130px]"><SelectValue placeholder="Type" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
                     <SelectItem value="Prepaid">Prepaid</SelectItem>
@@ -365,19 +274,14 @@ export default function CategoriesPage() {
                   </SelectContent>
                 </Select>
                 <Select value={String(itemsPerPage)} onValueChange={handleItemsPerPageChange}>
-                  <SelectTrigger className="w-full sm:w-[100px]">
-                    <SelectValue placeholder="Page Size" />
-                  </SelectTrigger>
+                  <SelectTrigger className="w-full sm:w-[100px]"><SelectValue placeholder="Page Size" /></SelectTrigger>
                   <SelectContent>
-                    {[10, 25, 50, 100].map(val => (
-                      <SelectItem key={val} value={String(val)}>{val} / page</SelectItem>
-                    ))}
+                    {[10, 25, 50, 100].map(val => <SelectItem key={val} value={String(val)}>{val} / page</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {/* Table */}
             <div className="border rounded-lg bg-card">
               <Table>
                 <TableHeader>
@@ -399,23 +303,15 @@ export default function CategoriesPage() {
                     <TableSpinner colSpan={10} />
                   ) : paginatedNumbers.length > 0 ? (
                     paginatedNumbers.map((num) => (
-                      <TableRow
-                        key={num.id}
-                        className="cursor-pointer"
-                        onClick={() => navigate(`/numbers/${num.id}`)}
-                      >
+                      <TableRow key={num.id} className="cursor-pointer" onClick={() => navigate(`/numbers/${num.id}`)}>
                         <TableCell>{num.srNo}</TableCell>
-                        <TableCell className="font-medium">
-                          {highlightMatch(num.mobile, numberSearch)}
-                        </TableCell>
+                        <TableCell className="font-medium">{highlightMatch(num.mobile, numberSearch)}</TableCell>
                         <TableCell>{num.sum}</TableCell>
                         <TableCell>{calculateSimpleSum(num.mobile)}</TableCell>
-                        <TableCell>₹{num.salePrice.toLocaleString()}</TableCell>
+                        <TableCell>₹{Number(num.salePrice).toLocaleString()}</TableCell>
                         <TableCell>{num.numberType}</TableCell>
                         <TableCell>
-                          <Badge variant={num.uploadStatus === 'Done' ? 'secondary' : 'outline'}>
-                            {num.uploadStatus}
-                          </Badge>
+                          <Badge variant={num.uploadStatus === 'Done' ? 'secondary' : 'outline'}>{num.uploadStatus}</Badge>
                         </TableCell>
                         <TableCell>{num.assignedTo}</TableCell>
                         <TableCell>
@@ -428,20 +324,13 @@ export default function CategoriesPage() {
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleCopyNumber(num.mobile)}
-                              title="Copy Number"
-                            >
+                            <Button variant="ghost" size="icon" onClick={() => handleCopyNumber(num.mobile)} title="Copy Number">
                               <Copy className="h-4 w-4" />
                             </Button>
                             {(role === 'admin' || role === 'employee') && (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
+                                  <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem onClick={() => navigate(`/numbers/${num.id}`)}>
@@ -460,10 +349,7 @@ export default function CategoriesPage() {
                                   <DropdownMenuItem onClick={() => handlePreBook(num)}>
                                     <Bookmark className="mr-2 h-4 w-4" /> Pre-Book Number
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    className="text-green-600 focus:text-green-700"
-                                    onClick={() => handleSellNumber(num)}
-                                  >
+                                  <DropdownMenuItem className="text-green-600 focus:text-green-700" onClick={() => handleSellNumber(num)}>
                                     <DollarSign className="mr-2 h-4 w-4" /> Mark as Sold
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
@@ -486,7 +372,7 @@ export default function CategoriesPage() {
             <Pagination
               currentPage={currentPage}
               totalPages={totalPages}
-              onPageChange={handlePageChange}
+              onPageChange={setCurrentPage}
               itemsPerPage={itemsPerPage}
               totalItems={sortedAndFilteredNumbers.length}
             />
@@ -496,44 +382,16 @@ export default function CategoriesPage() {
 
       {/* Modals */}
       {selectedNumber && (
-        <RtpStatusModal
-          isOpen={isRtpModalOpen}
-          onClose={() => {
-            setIsRtpModalOpen(false);
-            setSelectedNumber(null);
-          }}
-          number={selectedNumber}
-        />
+        <RtpStatusModal isOpen={isRtpModalOpen} onClose={() => { setIsRtpModalOpen(false); setSelectedNumber(null); }} number={selectedNumber} />
       )}
       {selectedNumber && (
-        <EditUploadStatusModal
-          isOpen={isUploadModalOpen}
-          onClose={() => {
-            setIsUploadModalOpen(false);
-            setSelectedNumber(null);
-          }}
-          number={selectedNumber}
-        />
+        <EditUploadStatusModal isOpen={isUploadModalOpen} onClose={() => { setIsUploadModalOpen(false); setSelectedNumber(null); }} number={selectedNumber} />
       )}
       {selectedNumber && (
-        <SellNumberModal
-          isOpen={isSellModalOpen}
-          onClose={() => {
-            setIsSellModalOpen(false);
-            setSelectedNumber(null);
-          }}
-          number={selectedNumber}
-        />
+        <SellNumberModal isOpen={isSellModalOpen} onClose={() => { setIsSellModalOpen(false); setSelectedNumber(null); }} number={selectedNumber} />
       )}
       {selectedNumber && (
-        <EditLocationModal
-          isOpen={isLocationModalOpen}
-          onClose={() => {
-            setIsLocationModalOpen(false);
-            setSelectedNumber(null);
-          }}
-          selectedNumbers={[selectedNumber]}
-        />
+        <EditLocationModal isOpen={isLocationModalOpen} onClose={() => { setIsLocationModalOpen(false); setSelectedNumber(null); }} selectedNumbers={[selectedNumber]} />
       )}
     </>
   );

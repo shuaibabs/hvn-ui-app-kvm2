@@ -30,8 +30,9 @@ import { useNavigation } from '@/context/navigation-context';
 import { EditLocationModal } from '@/components/edit-location-modal';
 import { BulkEditUploadStatusModal } from '@/components/bulk-edit-upload-status-modal';
 import { BulkDeleteNumbersModal } from '@/components/bulk-delete-numbers-modal';
-import { cn } from '@/lib/utils';
+import { cn, matchesExactPlacement } from '@/lib/utils';
 import { AdvancedSearch, type AdvancedSearchState } from '@/components/advanced-search';
+import { ExactPlacementSearch } from '@/components/exact-placement-search';
 import { BulkUploadStatusChangeModal } from '@/components/bulk-upload-status-change-modal';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -80,6 +81,7 @@ export default function AllNumbersPage() {
   const [sortConfig, setSortConfig] = useState<{ key: SortableColumn; direction: 'ascending' | 'descending' } | null>({ key: 'srNo', direction: 'ascending' });
   const [isPreBookConfirmationOpen, setIsPreBookConfirmationOpen] = useState(false);
   const [advancedSearch, setAdvancedSearch] = useState<AdvancedSearchState>(initialAdvancedSearchState);
+  const [exactPlacement, setExactPlacement] = useState('');
 
   const [rowsToDelete, setRowsToDelete] = useState<string[]>([]);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -102,7 +104,8 @@ export default function AllNumbersPage() {
       )
       .filter(num =>
         num.mobile && num.mobile.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      )
+      .filter(num => matchesExactPlacement(num.mobile, exactPlacement));
 
     // Advanced search filtering
     if (Object.values(advancedSearch).some(v => v)) {
@@ -197,7 +200,7 @@ export default function AllNumbersPage() {
     }
 
     return sortableItems;
-  }, [numbers, searchTerm, statusFilter, typeFilter, sortConfig, recentlyAutoRtpIds, advancedSearch]);
+  }, [numbers, searchTerm, statusFilter, typeFilter, sortConfig, recentlyAutoRtpIds, advancedSearch, exactPlacement]);
 
   const totalPages = Math.ceil(sortedAndFilteredNumbers.length / itemsPerPage);
   const paginatedNumbers = sortedAndFilteredNumbers.slice(
@@ -465,6 +468,11 @@ export default function AllNumbersPage() {
           )}
         </div>
       </PageHeader>
+      <ExactPlacementSearch
+        value={exactPlacement}
+        onChange={(v) => { setExactPlacement(v); setCurrentPage(1); }}
+        onSearch={() => setCurrentPage(1)}
+      />
       <AdvancedSearch
         onSearchChange={setAdvancedSearch}
         initialState={initialAdvancedSearchState}
