@@ -5,7 +5,7 @@ import { useApp } from "@/context/app-context";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { BellRing, Calendar } from "lucide-react";
-import { format } from "date-fns";
+import { formatReminderDate } from '@/lib/system-reminders';
 import { Badge } from "./ui/badge";
 
 export function WorkReminderPopup() {
@@ -39,9 +39,10 @@ export function WorkReminderPopup() {
                                  <Badge variant="destructive">Due</Badge>
                             </div>
                             <p className="text-sm text-muted-foreground mt-1">Assigned to: {reminder.assignedTo}</p>
+                            <p className="text-sm text-muted-foreground mt-1">Account Name: {reminder.accountName || 'N/A'}</p>
                             <div className="flex items-center text-sm text-muted-foreground mt-2">
                                 <Calendar className="mr-2 h-4 w-4" />
-                                Due Date: {format(reminder.dueDate.toDate(), 'PPP')}
+                                Due Date: {formatReminderDate(reminder.dueDate)} (IST)
                             </div>
                         </div>
                     ))}

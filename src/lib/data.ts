@@ -99,6 +99,9 @@ export type PreBookingRecord = {
 }
 
 export type Reminder = {
+  accountName?: string;
+  mobile?: string;
+  numberId?: string;
   id: string; // Firestore document ID
   srNo: number;
   taskId?: string; // Unique ID to prevent duplicate reminders for the same event

@@ -9,8 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
-import { LogIn, MoreHorizontal, Edit } from 'lucide-react';
-import { format } from 'date-fns';
+import { LogIn, MoreHorizontal, Edit, Copy, Search } from 'lucide-react';
+import { formatReminderDate } from '@/lib/system-reminders';
 import { TableSpinner } from '@/components/ui/spinner';
 import { useAuth } from '@/context/auth-context';
 import { NumberRecord } from '@/lib/data';
@@ -18,11 +18,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EditLocationModal } from '@/components/edit-location-modal';
 import { Input } from '@/components/ui/input';
+import { BulkCheckInModal } from '@/components/bulk-check-in-modal';
+import { locationClipboardText } from '@/lib/number-actions';
+import { useToast } from '@/hooks/use-toast';
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100, 250, 500, 1000, 5000];
 
 export default function SimLocationsPage() {
-  const { numbers, checkInNumber, loading } = useApp();
+  const { numbers, recordLocationCopy, recordLocationSearch, loading } = useApp();
+  const { toast } = useToast();
   const { user, role } = useAuth();
   const [locationTypeFilter, setLocationTypeFilter] = useState('all');
   const [currentLocationFilter, setCurrentLocationFilter] = useState('all');
@@ -31,6 +35,11 @@ export default function SimLocationsPage() {
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [locationSearch, setLocationSearch] = useState('');
+  const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
+  const [checkInMobiles, setCheckInMobiles] = useState<string[]>([]);
+  const [copying, setCopying] = useState(false);
+  const [searching, setSearching] = useState(false);
 
   const currentLocationOptions = useMemo(() => {
     const allLocations = numbers.map(n => n.currentLocation).filter(Boolean);
@@ -41,8 +50,9 @@ export default function SimLocationsPage() {
     return numbers
       .filter(num => locationTypeFilter === 'all' || num.locationType === locationTypeFilter)
       .filter(num => currentLocationFilter === 'all' || num.currentLocation === currentLocationFilter)
+      .filter(num => (num.currentLocation || '').toLowerCase().includes(locationSearch.trim().toLowerCase()))
       .filter(num => num.mobile && num.mobile.toLowerCase().includes(searchTerm.toLowerCase()));
-  }, [numbers, locationTypeFilter, currentLocationFilter, searchTerm]);
+  }, [numbers, locationTypeFilter, currentLocationFilter, locationSearch, searchTerm]);
 
   const totalPages = Math.ceil(filteredNumbers.length / itemsPerPage);
   const paginatedNumbers = filteredNumbers.slice(
@@ -78,6 +88,30 @@ export default function SimLocationsPage() {
 
   const selectedNumberRecords = numbers.filter(n => selectedRows.includes(n.id));
 
+  const openCheckIn = (mobiles: string[] = []) => { setCheckInMobiles(mobiles); setIsCheckInModalOpen(true); };
+  const filterDescription = `Location type: ${locationTypeFilter}; location: ${currentLocationFilter}; location search: ${locationSearch || 'all'}; mobile search: ${searchTerm || 'all'}`;
+  const searchLocations = async () => {
+    if (searching || loading) return;
+    setSearching(true); setCurrentPage(1);
+    try {
+      await recordLocationSearch(filteredNumbers.length, filterDescription);
+      toast({ title: 'SIM Location Search', description: `${filteredNumbers.length} number(s) found. Search recorded and Telegram notification queued.` });
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Unable to record search', description: error instanceof Error ? error.message : 'Please try again.' });
+    } finally { setSearching(false); }
+  };
+  const copyLocations = async (records: NumberRecord[], selected: boolean) => {
+    if (!records.length || copying) return;
+    setCopying(true);
+    try {
+      await navigator.clipboard.writeText(locationClipboardText(records));
+      await recordLocationCopy(records, `${selected ? 'Selected numbers' : 'Search results'}; ${filterDescription}`);
+      toast({ title: 'Copied SIM Locations', description: `${records.length} number(s) copied with current location. Activity saved and Telegram notification queued.` });
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Copy or activity recording failed', description: error instanceof Error ? error.message : 'Unable to copy and record this action. Please try again.' });
+    } finally { setCopying(false); }
+  };
+
   const openLocationModal = (number?: NumberRecord) => {
     if (number) {
       setSelectedRows([number.id]);
@@ -94,7 +128,7 @@ export default function SimLocationsPage() {
     if (!highlight.trim()) {
       return <span>{text}</span>;
     }
-    const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
+    const parts = text.split(new RegExp(`(${highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
     return (
       <span>
         {parts.map((part, i) =>
@@ -117,11 +151,13 @@ export default function SimLocationsPage() {
         title="SIM Location Tracking"
         description="Track the current location and assignment of all SIMs."
       >
+        <Button onClick={() => openCheckIn()} disabled={loading}><LogIn className="mr-2 h-4 w-4" />Bulk Check-In Date</Button>
       </PageHeader>
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
         <div className="flex flex-col sm:flex-row items-center gap-4 flex-wrap w-full">
           <Input
             placeholder="Search by mobile number..."
+            aria-label="Search by mobile number"
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -129,7 +165,9 @@ export default function SimLocationsPage() {
             }}
             className="max-w-full sm:max-w-xs"
           />
-          <Select value={locationTypeFilter} onValueChange={setLocationTypeFilter}>
+          <Input placeholder="Search current location..." aria-label="Search current location" value={locationSearch} onChange={event => { setLocationSearch(event.target.value); setCurrentPage(1); }} onKeyDown={event => { if (event.key === 'Enter') void searchLocations(); }} className="max-w-full sm:max-w-xs" />
+          <Button variant="outline" disabled={loading || searching} onClick={searchLocations}><Search className="mr-2 h-4 w-4" />Search Locations</Button>
+          <Select value={locationTypeFilter} onValueChange={value => { setLocationTypeFilter(value); setCurrentPage(1); }}>
             <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder="Filter by location type" />
             </SelectTrigger>
@@ -140,7 +178,7 @@ export default function SimLocationsPage() {
               <SelectItem value="Dealer">Dealer</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={currentLocationFilter} onValueChange={setCurrentLocationFilter}>
+          <Select value={currentLocationFilter} onValueChange={value => { setCurrentLocationFilter(value); setCurrentPage(1); }}>
             <SelectTrigger className="w-full sm:w-[240px]">
               <SelectValue placeholder="Filter by Current Location" />
             </SelectTrigger>
@@ -168,6 +206,11 @@ export default function SimLocationsPage() {
               Edit Location ({selectedRows.length})
             </Button>
           )}
+          <Button variant="outline" disabled={loading || copying || !filteredNumbers.length} onClick={() => copyLocations(filteredNumbers, false)}><Copy className="mr-2 h-4 w-4" />Copy Results ({filteredNumbers.length})</Button>
+          {selectedNumberRecords.length > 0 && <>
+            <Button variant="outline" disabled={copying} onClick={() => copyLocations(selectedNumberRecords, true)}><Copy className="mr-2 h-4 w-4" />Copy Selected ({selectedNumberRecords.length})</Button>
+            <Button variant="outline" onClick={() => openCheckIn(selectedNumberRecords.map(number => number.mobile))}><LogIn className="mr-2 h-4 w-4" />Set Check-In Date ({selectedNumberRecords.length})</Button>
+          </>}
         </div>
       </div>
       <div className="border rounded-lg">
@@ -186,7 +229,7 @@ export default function SimLocationsPage() {
               <TableHead>Current Location</TableHead>
               <TableHead>Location Type</TableHead>
               <TableHead>Assigned To</TableHead>
-              <TableHead>Last Checked In</TableHead>
+              <TableHead>Check-In Date (IST)</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -208,12 +251,12 @@ export default function SimLocationsPage() {
                   <TableCell>{num.currentLocation}</TableCell>
                   <TableCell>{num.locationType}</TableCell>
                   <TableCell>{num.assignedTo}</TableCell>
-                  <TableCell>{num.checkInDate ? format(num.checkInDate.toDate(), 'PPP p') : 'N/A'}</TableCell>
+                  <TableCell>{formatReminderDate(num.checkInDate)}</TableCell>
                   <TableCell className="text-right">
                     <div className='flex items-center justify-end gap-2'>
-                      <Button size="sm" variant="outline" onClick={() => checkInNumber(num.id)}>
+                      <Button size="sm" variant="outline" onClick={() => openCheckIn([num.mobile])}>
                         <LogIn className="mr-2 h-4 w-4" />
-                        Check In
+                        Set Check-In Date
                       </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -255,6 +298,7 @@ export default function SimLocationsPage() {
         onClose={closeLocationModal}
         selectedNumbers={selectedNumberRecords}
       />
+      <BulkCheckInModal isOpen={isCheckInModalOpen} onClose={() => { setIsCheckInModalOpen(false); setSelectedRows([]); }} initialMobiles={checkInMobiles} />
     </>
   );
 }

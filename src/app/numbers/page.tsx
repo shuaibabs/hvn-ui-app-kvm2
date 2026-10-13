@@ -34,9 +34,11 @@ import { cn, matchesExactPlacement } from '@/lib/utils';
 import { AdvancedSearch, type AdvancedSearchState } from '@/components/advanced-search';
 import { ExactPlacementSearch } from '@/components/exact-placement-search';
 import { BulkUploadStatusChangeModal } from '@/components/bulk-upload-status-change-modal';
+import { BulkStatusChangeModal } from '@/components/bulk-status-change-modal';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { BulkUpdateSalePriceModal } from '@/components/bulk-update-sale-price-modal';
+import { BulkOwnershipModal } from '@/components/bulk-ownership-modal';
 
 type SortableColumn = keyof NumberRecord | 'id' | 'twoDigitSum';
 
@@ -73,7 +75,9 @@ export default function AllNumbersPage() {
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isBulkUploadStatusChangeModalOpen, setIsBulkUploadStatusChangeModalOpen] = useState(false);
+  const [isBulkStatusChangeModalOpen, setIsBulkStatusChangeModalOpen] = useState(false);
   const [isBulkUpdateSalePriceModalOpen, setIsBulkUpdateSalePriceModalOpen] = useState(false);
+  const [isOwnershipModalOpen, setIsOwnershipModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
@@ -443,7 +447,7 @@ export default function AllNumbersPage() {
         title="All Numbers (Master Inventory)"
         description="Search, filter, and manage all numbers in the system."
       >
-        <div className="flex flex-col sm:flex-row items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-center gap-2">
           <Button onClick={() => navigate('/numbers/new')} className="w-full sm:w-auto">
             <PlusCircle className="mr-2 h-4 w-4" />
             New Number
@@ -456,6 +460,12 @@ export default function AllNumbersPage() {
             <UploadCloud className="mr-2 h-4 w-4" />
             Bulk Upload Status
           </Button>
+          {(role === 'admin' || role === 'employee') && (
+            <Button variant="outline" onClick={() => setIsBulkStatusChangeModalOpen(true)} className="w-full sm:w-auto">
+              <ArrowUpDown className="mr-2 h-4 w-4" />
+              Bulk Status Change
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setIsBulkUpdateSalePriceModalOpen(true)} className="w-full sm:w-auto">
             <DollarSign className="mr-2 h-4 w-4" />
             Update Sale Price
@@ -531,6 +541,7 @@ export default function AllNumbersPage() {
         </div>
         {selectedRows.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => setIsOwnershipModalOpen(true)}>Change Ownership ({selectedRows.length})</Button>
             {role === 'admin' && (
               <Button variant="destructive" onClick={() => openDeleteModal(selectedRows)}>
                 <Trash className="mr-2 h-4 w-4" />
@@ -745,6 +756,8 @@ export default function AllNumbersPage() {
         isOpen={isBulkUpdateSalePriceModalOpen}
         onClose={() => setIsBulkUpdateSalePriceModalOpen(false)}
       />
+      <BulkOwnershipModal isOpen={isOwnershipModalOpen} onClose={() => { setIsOwnershipModalOpen(false); setSelectedRows([]); }} selectedNumbers={numbers.filter(number => selectedRows.includes(number.id))} />
+      <BulkStatusChangeModal isOpen={isBulkStatusChangeModalOpen} onClose={() => setIsBulkStatusChangeModalOpen(false)} />
       {role === 'admin' && (
         <AssignNumbersModal
           isOpen={isAssignModalOpen}

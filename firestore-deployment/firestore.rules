@@ -1,0 +1,184 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function member() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && profile().role in ['admin', 'employee'];
+    }
+    function admin() { return member() && profile().role == 'admin'; }
+    function assigned(data) { return member() && data.get('assignedTo', '') == profile().displayName; }
+    function own(data) { return member() && data.get('createdBy', '') == request.auth.uid; }
+    function originalAssigned(data) { return assigned(data.get('originalNumberData', {})); }
+    function nullableTimestamp(data, field) { return data.get(field, null) == null || data[field] is timestamp; }
+    function ownershipValid(data) {
+      return data.get('ownershipType', '') in ['Individual', 'Partnership']
+        && data.get('partnerName', '') is string
+        && ((data.ownershipType == 'Individual' && data.get('partnerName', '') == '')
+          || (data.ownershipType == 'Partnership' && data.partnerName.size() > 0 && data.partnerName.size() <= 120));
+    }
+    function numberValid(data) {
+      return data.mobile is string && data.mobile.matches('^[0-9]{10}$')
+        && nullableTimestamp(data, 'checkInDate')
+        && nullableTimestamp(data, 'safeCustodyDate') && nullableTimestamp(data, 'unsafeCustodyDate');
+    }
+    function rtpStatusValid(data) {
+      return (data.get('status', '') == 'RTP' && data.get('rtpDate', null) == null)
+        || (data.get('status', '') == 'Non-RTP' && data.get('rtpDate', null) is timestamp);
+    }
+    function numberUpdateValid() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return numberValid(request.resource.data)
+        && (!changed.hasAny(['ownershipType', 'partnerName']) || ownershipValid(request.resource.data))
+        && (!changed.hasAny(['status', 'rtpDate']) || rtpStatusValid(request.resource.data));
+    }
+    function reminderValid(data) {
+      return data.taskName is string && data.taskName.size() > 0
+        && data.assignedTo is list && data.dueDate is timestamp
+        && data.status in ['Pending', 'Done']
+        && data.get('accountName', '') is string;
+    }
+    function reminderAssigned(data) { return member() && profile().displayName in data.assignedTo; }
+
+    // Role and assignment names are managed only by administrators.
+    // This prevents employees from changing their identity to another employee's assignment.
+    match /users/{uid} {
+      allow get: if (signedIn() && request.auth.uid == uid) || member();
+      allow list: if member();
+      allow create, update: if admin() && request.resource.data.uid == uid
+        && request.resource.data.role in ['admin', 'employee']
+        && request.resource.data.displayName is string && request.resource.data.displayName.size() > 0;
+      allow delete: if admin() && uid != request.auth.uid;
+    }
+
+    match /numbers/{id} {
+      allow read: if admin() || assigned(resource.data);
+      // Restoring/cancelling a sale can retain the original creator of assigned inventory.
+      allow create: if (admin() || own(request.resource.data) || assigned(request.resource.data))
+        && numberValid(request.resource.data) && ownershipValid(request.resource.data);
+      allow update: if numberUpdateValid() && (admin() || (assigned(resource.data)
+        && request.resource.data.assignedTo == resource.data.assignedTo
+        && request.resource.data.createdBy == resource.data.createdBy
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['srNo'])));
+      // Employee sales/pre-booking flows atomically remove their assigned inventory record.
+      allow delete: if admin() || assigned(resource.data);
+    }
+
+    match /sales/{id} {
+      allow read: if admin() || originalAssigned(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid
+        && (admin() || originalAssigned(request.resource.data));
+      allow update: if admin() || (originalAssigned(resource.data)
+        && request.resource.data.originalNumberData.assignedTo == resource.data.originalNumberData.assignedTo
+        && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if admin() || originalAssigned(resource.data);
+    }
+    match /prebookings/{id} {
+      allow read: if admin() || originalAssigned(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid
+        && (admin() || originalAssigned(request.resource.data));
+      allow update: if admin() || (originalAssigned(resource.data)
+        && request.resource.data.originalNumberData.assignedTo == resource.data.originalNumberData.assignedTo
+        && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if admin() || originalAssigned(resource.data);
+    }
+    match /deletedNumbers/{id} {
+      allow read: if admin() || originalAssigned(resource.data);
+      allow create, update, delete: if admin();
+    }
+
+    match /reminders/{id} {
+      allow read: if admin() || reminderAssigned(resource.data);
+      allow create: if admin() && reminderValid(request.resource.data)
+        && request.resource.data.createdBy in [request.auth.uid, 'system'];
+      allow update: if reminderValid(request.resource.data) && (admin() || (reminderAssigned(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'notes', 'completionDate'])
+        && request.resource.data.status == 'Done'));
+      allow delete: if admin() && resource.data.status == 'Done';
+    }
+
+    match /activities/{id} {
+      allow read: if member();
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.source == 'UI' && request.resource.data.timestamp is timestamp
+        && request.resource.data.action is string && request.resource.data.description is string
+        && request.resource.data.get('groupName', 'ACTIVITY') in ['ACTIVITY', 'INVENTORY', 'SALES', 'PREBOOKING',
+          'USERS', 'GLOBAL_HISTORY', 'PARTNERS', 'POSTPAID_NUMBERS', 'SIM_LOCATIONS', 'DEALER_PURCHASES',
+          'BASIC_PREMIUM_NUMBERS', 'WORK_REMINDERS', 'COCP', 'DELETED_NUMBERS', 'CATEGORIES']
+        && request.resource.data.get('notificationStatus', 'Pending') == 'Pending'
+        && !request.resource.data.keys().hasAny(['notificationAttempts', 'notificationLeaseUntil',
+          'notificationNextAttemptAt', 'notificationSentAt', 'notificationError', 'notificationProgress']);
+      // Queue claims and delivery status belong to the Firebase Admin SDK worker.
+      allow update: if false;
+      allow delete: if admin();
+    }
+
+    // These directories are queried without employee filters by the existing application.
+    match /salesVendors/{id} {
+      allow read: if member();
+      allow create, update, delete: if admin();
+    }
+    match /dealers/{id} {
+      allow read: if member();
+      allow create, update, delete: if admin();
+    }
+    match /basicPremiumVendors/{id} {
+      allow read: if member();
+      allow create, update, delete: if admin();
+    }
+
+    match /dealerPurchases/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if admin() || (own(resource.data) && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if admin() || own(resource.data);
+    }
+    match /dealerSales/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if admin() || (member() && request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if admin();
+    }
+    match /dealerDeletes/{id} {
+      allow read: if admin() || (member() && resource.data.deletedBy == profile().displayName);
+      allow create, update, delete: if admin();
+    }
+    match /salesPayments/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if admin();
+    }
+    match /dealerPayments/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if admin();
+    }
+    match /basic/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid && numberValid(request.resource.data);
+      allow update: if admin() || (own(resource.data) && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if admin() || own(resource.data);
+    }
+    match /premium/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid && numberValid(request.resource.data);
+      allow update: if admin() || (own(resource.data) && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if admin() || own(resource.data);
+    }
+    match /basicPremiumSales/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if admin() || (member() && request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if admin();
+    }
+    match /basicPremiumDeletes/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create, update, delete: if admin();
+    }
+    match /basicPremiumPayments/{id} {
+      allow read: if admin() || own(resource.data);
+      allow create: if member() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if admin();
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -5,7 +5,7 @@
 import { useApp } from '@/context/app-context';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
-import { format } from 'date-fns';
+import { formatReminderDate } from '@/lib/system-reminders';
 import { PlusCircle, Check, Trash, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Spinner, TableSpinner } from '@/components/ui/spinner';
 import { useState, useMemo } from 'react';
@@ -276,6 +276,7 @@ export default function RemindersPage() {
                     />
                 </TableHead>
               <SortableHeader column="taskName" label="Task" />
+              <SortableHeader column="accountName" label="Account Name" />
               <TableHead>Assigned To</TableHead>
               <SortableHeader column="dueDate" label="Due Date" />
               <SortableHeader column="status" label="Status" />
@@ -285,7 +286,7 @@ export default function RemindersPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-                <TableSpinner colSpan={7} />
+                <TableSpinner colSpan={8} />
             ) : paginatedReminders.length > 0 ? (
                 paginatedReminders.map((reminder) => {
                     const assignees = Array.isArray(reminder.assignedTo) ? reminder.assignedTo : [reminder.assignedTo].filter(Boolean);
@@ -299,6 +300,7 @@ export default function RemindersPage() {
                                 />
                             </TableCell>
                             <TableCell className="font-medium">{reminder.taskName}</TableCell>
+                            <TableCell>{reminder.accountName || 'N/A'}</TableCell>
                             <TableCell>
                                 <div className="flex items-center space-x-2">
                                      <TooltipProvider>
@@ -321,7 +323,7 @@ export default function RemindersPage() {
                                     {assignees.length === 0 && <span className="text-xs text-muted-foreground">Unassigned</span>}
                                 </div>
                             </TableCell>
-                            <TableCell>{format(reminder.dueDate.toDate(), 'PPP')}</TableCell>
+                            <TableCell>{formatReminderDate(reminder.dueDate)}</TableCell>
                             <TableCell>
                                 <Badge variant={reminder.status === 'Done' ? 'secondary' : 'destructive'} className={reminder.status === 'Done' ? `bg-green-500/20 text-green-700` : `bg-yellow-500/20 text-yellow-700`}>
                                     {reminder.status}
@@ -362,7 +364,7 @@ export default function RemindersPage() {
                 })
             ) : (
                 <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
+                    <TableCell colSpan={8} className="h-24 text-center">
                         No reminders found.
                     </TableCell>
                 </TableRow>

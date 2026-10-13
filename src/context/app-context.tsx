@@ -38,6 +38,8 @@ import {
   doc,
   serverTimestamp,
   deleteDoc,
+  deleteField,
+  runTransaction,
   writeBatch,
   Timestamp,
   onSnapshot,
@@ -55,6 +57,7 @@ import { FirestorePermissionError } from '@/firebase/errors';
 import { calculateDigitalRoot, cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
+import { custodyTasks, indiaDay, isReminderDue, planSystemReminders, reminderAccountName } from '@/lib/system-reminders';
 
 // Helper to get the next serial number for a collection
 const getNextSrNo = (records: { srNo?: number }[]): number => {
@@ -142,6 +145,11 @@ type AppContextType = {
   addActivity: (activity: Omit<Activity, 'id' | 'srNo' | 'timestamp' | 'createdBy' | 'source' | 'groupName'>, showToast?: boolean) => void;
   assignNumbersToEmployee: (numberIds: string[], employeeName: string, location: { locationType: 'Store' | 'Employee' | 'Dealer'; currentLocation: string; }) => void;
   checkInNumber: (id: string) => void;
+  bulkUpdateOwnership: (ids: string[], ownershipType: 'Individual' | 'Partnership', partnerName: string) => Promise<void>;
+  bulkUpdateCheckInDate: (ids: string[], date: Date) => Promise<void>;
+  bulkUpdateNumberStatus: (ids: string[], status: 'RTP' | 'Non-RTP', rtpDate: Date | null) => Promise<void>;
+  recordLocationCopy: (records: NumberRecord[], filterDescription: string) => Promise<void>;
+  recordLocationSearch: (resultCount: number, filterDescription: string) => Promise<void>;
   sellNumber: (id: string, details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => void;
   bulkSellNumbers: (numbersToSell: NumberRecord[], details: { salePrice: number; soldTo: string; saleDate: Date; remark?: string; saleReason?: string }) => void;
   cancelSale: (saleId: string) => void;
@@ -438,9 +446,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addReminder = useCallback(async (data: NewReminderData, showToast = true) => {
     if (!db || !user) return;
+    const accountName = reminderAccountName(data, numbers, preBookings);
+    const mobile = data.mobile || data.taskName.match(/\b\d{10}\b/)?.[0];
 
     const newReminder: Omit<Reminder, 'id'> = {
       ...data,
+      accountName,
+      ...(mobile ? { mobile } : {}),
       srNo: getNextSrNo(reminders),
       status: 'Pending',
       dueDate: Timestamp.fromDate(data.dueDate),
@@ -454,7 +466,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addActivity({
           employeeName: user.displayName || user.email || 'User',
           action: 'Added Reminder',
-          description: `Assigned task "${data.taskName}" to ${data.assignedTo.join(', ')}`
+          description: `Assigned task "${data.taskName}" to ${data.assignedTo.join(', ')}. Account: ${accountName}.`
         });
       }
     } catch (serverError) {
@@ -465,7 +477,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       errorEmitter.emit('permission-error', permissionError);
     }
-  }, [db, user, reminders, addActivity]);
+  }, [db, user, reminders, numbers, preBookings, addActivity]);
 
   useEffect(() => {
     if (activitiesLoading || !user) return;
@@ -640,7 +652,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const filteredSales = useMemo(() => sales, [sales]);
   const filteredPreBookings = useMemo(() => preBookings, [preBookings]);
   const filteredDeletedNumbers = useMemo(() => deletedNumbers, [deletedNumbers]);
-  const filteredReminders = useMemo(() => reminders, [reminders]);
+  const filteredReminders = useMemo(() => reminders.map(reminder => ({
+    ...reminder, accountName: reminderAccountName(reminder, numbers, preBookings)
+  })), [reminders, numbers, preBookings]);
   const filteredSalesPayments = useMemo(() => salesPayments, [salesPayments]);
   const filteredDealerPayments = useMemo(() => dealerPayments, [dealerPayments]);
   const filteredDealerPurchases = useMemo(() => dealerPurchases, [dealerPurchases]);
@@ -825,72 +839,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const createSystemReminders = async () => {
       if (loading || !user || !db || !users.length || !reminders || role !== 'admin') return;
 
-      const adminUsers = users.filter(u => u.role === 'admin').map(u => u.displayName);
+      const adminUsers = [...new Set(users.filter(u => u.role === 'admin').map(u => u.displayName).filter(Boolean))];
       if (adminUsers.length === 0) return;
 
-      const batch = writeBatch(db);
       let currentReminderSrNo = getNextSrNo(reminders);
-      const remindersCollection = collection(db, 'reminders');
-      let operationsExist = false;
-
-      const existingTaskIds = new Set(reminders.map(r => r.taskId).filter(Boolean));
-
-      // COCP Safe Custody Date Reminders
-      const cocpNumbers = numbers.filter(n => n.numberType === 'COCP' && n.safeCustodyDate && (isToday(n.safeCustodyDate.toDate()) || isPast(n.safeCustodyDate.toDate())));
-      for (const num of cocpNumbers) {
-        const taskId = `cocp-safecustody-${num.id}`;
-        if (!existingTaskIds.has(taskId)) {
-          batch.set(doc(remindersCollection), {
-            taskId: taskId,
-            taskName: `Safe Custody Date arrived for ${num.mobile}`,
-            assignedTo: adminUsers,
-            dueDate: num.safeCustodyDate,
-            status: 'Pending', createdBy: 'system', srNo: currentReminderSrNo++,
+      const plan = planSystemReminders(numbers, preBookings, reminders, adminUsers);
+      const operations = [
+        ...plan.updates.map(update => ({ ...update, create: false })),
+        ...plan.creates.map(create => ({ ...create, create: true }))
+      ];
+      try {
+        for (let offset = 0; offset < operations.length; offset += 449) {
+          const batch = writeBatch(db);
+          const chunk = operations.slice(offset, offset + 449);
+          for (const operation of chunk) {
+            const ref = doc(db, 'reminders', operation.id);
+            const data: DocumentData = { ...operation.data };
+            if (data.dueDate instanceof Date) data.dueDate = Timestamp.fromDate(data.dueDate);
+            if (operation.create) {
+              batch.set(ref, { ...data, createdBy: 'system', srNo: currentReminderSrNo++, createdAt: serverTimestamp() });
+            } else {
+              data.completionDate = data.status === 'Done' ? serverTimestamp() : deleteField();
+              batch.update(ref, data);
+            }
+          }
+          batch.set(doc(collection(db, 'activities')), {
+            employeeName: 'System', action: 'Synchronized Number Reminders', groupName: 'WORK_REMINDERS',
+            description: chunk.map(operation => {
+              const data = { ...reminders.find(reminder => reminder.id === operation.id), ...operation.data };
+              return `${operation.create ? 'Created' : 'Updated'}: ${data.taskName || operation.id}; Account: ${data.accountName || 'N/A'}; Due: ${indiaDay(data.dueDate) || 'N/A'} (IST); Status: ${data.status}.`;
+            }).join('\n'),
+            createdBy: user.uid, source: 'UI', srNo: getNextSrNo(activities) + offset / 449,
+            timestamp: serverTimestamp(), notificationStatus: 'Pending'
           });
-          operationsExist = true;
-          addActivity({
-            employeeName: 'System',
-            action: 'Safe Custody Date Arrived',
-            description: `Safe Custody Date for COCP number ${num.mobile} has arrived.`,
-          }, false);
+          await batch.commit();
         }
-      }
-
-      // Pre-Booked RTP Reminders
-      const rtpPreBookings = preBookings.filter(pb => pb.originalNumberData?.status === 'RTP');
-      for (const pb of rtpPreBookings) {
-        const taskId = `prebooked-rtp-${pb.id}`;
-        if (!existingTaskIds.has(taskId)) {
-          batch.set(doc(remindersCollection), {
-            taskId: taskId,
-            taskName: `Pre-Booked Number is now RTP: ${pb.mobile}`,
-            assignedTo: adminUsers,
-            dueDate: Timestamp.now(),
-            status: 'Pending', createdBy: 'system', srNo: currentReminderSrNo++,
-          });
-          operationsExist = true;
-        }
-      }
-
-      if (operationsExist) {
-        await batch.commit().catch(e => console.error("Error in system reminder creation batch:", e));
+      } catch (error) {
+        console.error('Error synchronizing system reminders:', error);
       }
     };
 
     createSystemReminders();
-  }, [loading, user, users, numbers, reminders, preBookings, db, addActivity]);
+    // Recheck when midnight passes even if inventory snapshots have not changed.
+    const interval = setInterval(createSystemReminders, 60000);
+    return () => clearInterval(interval);
+  }, [loading, user, role, users, numbers, reminders, preBookings, db]);
 
 
   useEffect(() => {
     // This effect solely handles displaying the popup for due, pending reminders
     const checkAndShowPopup = () => {
       if (loading || !user) return;
-      const dueReminders = reminders.filter(r => {
+      const dueReminders = filteredReminders.filter(r => {
         if (r.status !== 'Pending') return false;
-        const dueDate = r.dueDate.toDate();
-        return isValid(dueDate) && (isToday(dueDate) || isPast(dueDate));
+        return isReminderDue(r.dueDate);
       });
-      const newDueReminders = dueReminders.filter(r => !remindersShownInPopup.has(r.id));
+      const popupKey = (r: Reminder) => `${r.id}:${indiaDay(r.dueDate)}`;
+      const newDueReminders = dueReminders.filter(r => !remindersShownInPopup.has(popupKey(r)));
+      // Remove resolved entries and refresh reused recurring-reminder documents.
+      const currentDue = new Map(dueReminders.map(r => [r.id, r]));
+      setPendingRemindersForPopup(prev => prev.flatMap(r => currentDue.has(r.id) ? [currentDue.get(r.id)!] : []));
+      if (!dueReminders.length) setShowReminderPopup(false);
       if (newDueReminders.length > 0) {
         setPendingRemindersForPopup(prev => {
           const existingIds = new Set(prev.map(p => p.id));
@@ -899,7 +908,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         setShowReminderPopup(true);
         const newShownSet = new Set(remindersShownInPopup);
-        newDueReminders.forEach(r => newShownSet.add(r.id));
+        newDueReminders.forEach(r => newShownSet.add(popupKey(r)));
         setRemindersShownInPopup(newShownSet);
       }
     };
@@ -909,7 +918,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       clearTimeout(timeoutId);
       clearInterval(intervalId);
     };
-  }, [loading, user, reminders, remindersShownInPopup]);
+  }, [loading, user, filteredReminders, remindersShownInPopup]);
 
   useEffect(() => {
     if (!db || remindersLoading || role !== 'admin') {
@@ -1168,14 +1177,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { canBeDone: true, message: "" };
     }
 
-    if (reminder.taskId.startsWith('cocp-safecustody-')) {
-      const numberId = reminder.taskId.replace('cocp-safecustody-', '');
-      const number = numbers.find(n => n.id === numberId);
-      if (number && number.safeCustodyDate) {
-        const custodyDate = number.safeCustodyDate.toDate();
-        if (isToday(custodyDate) || isPast(custodyDate)) {
-          return { canBeDone: false, message: `The Safe Custody Date for ${number.mobile} has not been updated to a future date.` };
-        }
+    const custodyTask = custodyTasks.find(task => reminder.taskId!.startsWith(task.prefix));
+    if (custodyTask) {
+      const numberId = reminder.taskId.slice(custodyTask.prefix.length);
+      const number = numbers.find(n => n.id === numberId) || preBookings.find(pb => pb.id === numberId)?.originalNumberData;
+      if (number?.numberType === 'COCP' && isReminderDue(number[custodyTask.field])) {
+        return { canBeDone: false, message: `The ${custodyTask.label} Date for ${number.mobile} has not been updated to a future date.` };
       }
     } else if (reminder.taskId.startsWith('prebooked-rtp-')) {
       const preBookingId = reminder.taskId.replace('prebooked-rtp-', '');
@@ -1263,6 +1270,121 @@ export function AppProvider({ children }: { children: ReactNode }) {
         requestResourceData: { info: `Batch assign to ${employeeName}` },
       });
       errorEmitter.emit('permission-error', permissionError);
+    });
+  };
+
+  // Store every new bulk action with its inventory changes in the same transaction.
+  // The bot's activity worker delivers queued notifications even if this browser closes.
+  const recordBulkInventoryChange = async (
+    ids: string[], action: string, groupName: string,
+    buildChange: (current: NumberRecord, preview: NumberRecord) => { fields: DocumentData; description: string } | null
+  ) => {
+    if (!db || !user || !['admin', 'employee'].includes(role || '')) throw new Error('Sign in as an admin or employee to continue.');
+    const selected = [...new Set(ids)];
+    const previews = new Map(numbers.map(number => [number.id, number]));
+    const performer = profile?.displayName || user.displayName || user.email || 'User';
+    let saved = 0;
+    try {
+      for (let offset = 0; offset < selected.length; offset += 40) {
+        const chunk = selected.slice(offset, offset + 40);
+        const activityRef = doc(collection(db, 'activities'));
+        const count = await runTransaction(db, async transaction => {
+          const snapshots = await Promise.all(chunk.map(id => transaction.get(doc(db, 'numbers', id))));
+          const changes = snapshots.flatMap(snapshot => {
+            const preview = previews.get(snapshot.id);
+            if (!snapshot.exists() || !preview) throw new Error('A number is no longer available. Review the selection and try again.');
+            const current = { ...snapshot.data(), id: snapshot.id } as NumberRecord;
+            if (current.mobile !== preview.mobile || (role === 'employee' && current.assignedTo !== profile?.displayName)) {
+              throw new Error('A number changed or is no longer assigned to you. Review the selection and try again.');
+            }
+            const change = buildChange(current, preview);
+            return change ? [{ snapshot, change }] : [];
+          });
+          if (!changes.length) return 0;
+          for (const { snapshot, change } of changes) {
+            transaction.update(snapshot.ref, {
+              ...change.fields,
+              history: arrayUnion(createLifecycleEvent(action, change.description, performer))
+            });
+          }
+          transaction.set(activityRef, {
+            employeeName: performer, action, groupName,
+            description: changes.map(({ change }) => change.description).join('\n'),
+            createdBy: user.uid, source: 'UI', timestamp: serverTimestamp(),
+            srNo: getNextSrNo(activities) + offset / 40,
+            notificationStatus: 'Pending'
+          });
+          return changes.length;
+        });
+        saved += count;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save changes.';
+      throw new Error(`${saved ? `${saved} number(s) already saved and logged. ` : ''}${message}`);
+    }
+    toast({ title: action, description: `${saved} number(s) updated. Activities saved and Telegram notifications queued.` });
+  };
+
+  const bulkUpdateOwnership = async (ids: string[], ownershipType: 'Individual' | 'Partnership', partnerName: string) => {
+    if (!['Individual', 'Partnership'].includes(ownershipType)) throw new Error('Choose a valid ownership type.');
+    const partner = ownershipType === 'Partnership' ? partnerName.trim() : '';
+    if (ownershipType === 'Partnership' && (!partner || partner.length > 120)) throw new Error('Enter a partner name of 1–120 characters.');
+    await recordBulkInventoryChange(ids, 'Bulk Updated Ownership', 'INVENTORY', (current, preview) => {
+      if (current.ownershipType === ownershipType && (current.partnerName || '') === partner) return null;
+      if (current.ownershipType !== preview.ownershipType || (current.partnerName || '') !== (preview.partnerName || '')) {
+        throw new Error(`Ownership for ${current.mobile} changed. Review the preview and try again.`);
+      }
+      return { fields: { ownershipType, partnerName: partner }, description: `${current.mobile}: ${current.ownershipType}${current.partnerName ? ` (${current.partnerName})` : ''} → ${ownershipType}${partner ? ` (${partner})` : ''}.` };
+    });
+  };
+
+  const bulkUpdateCheckInDate = async (ids: string[], date: Date) => {
+    if (!Number.isFinite(date.getTime())) throw new Error('Choose a valid check-in date.');
+    const dueDate = Timestamp.fromDate(date);
+    await recordBulkInventoryChange(ids, 'Bulk Updated Check-In Date', 'SIM_LOCATIONS', (current, preview) => {
+      if (current.checkInDate?.toMillis() === dueDate.toMillis()) return null;
+      if (current.checkInDate?.toMillis() !== preview.checkInDate?.toMillis()) {
+        throw new Error(`Check-in date for ${current.mobile} changed. Review the preview and try again.`);
+      }
+      return { fields: { checkInDate: dueDate }, description: `${current.mobile}: Check-in date ${indiaDay(current.checkInDate) || 'not set'} → ${indiaDay(date)} (IST); location: ${current.currentLocation || 'N/A'}.` };
+    });
+  };
+
+  const bulkUpdateNumberStatus = async (ids: string[], status: 'RTP' | 'Non-RTP', rtpDate: Date | null) => {
+    if (!['RTP', 'Non-RTP'].includes(status)) throw new Error('Choose RTP or Non-RTP.');
+    if (status === 'Non-RTP' && (!rtpDate || !Number.isFinite(rtpDate.getTime()) || indiaDay(rtpDate)! <= indiaDay(new Date())!)) {
+      throw new Error('Choose a future RTP date (IST) for Non-RTP numbers.');
+    }
+    const scheduledDate = status === 'Non-RTP' ? Timestamp.fromDate(rtpDate!) : null;
+    await recordBulkInventoryChange(ids, 'Bulk Updated RTP Status', 'INVENTORY', (current, preview) => {
+      if (current.status !== preview.status || current.rtpDate?.toMillis() !== preview.rtpDate?.toMillis()) {
+        throw new Error(`RTP status or date for ${current.mobile} changed. Review the preview and try again.`);
+      }
+      if (current.status === status && (current.rtpDate?.toMillis() ?? null) === (scheduledDate?.toMillis() ?? null)) return null;
+      return {
+        fields: { status, rtpDate: scheduledDate },
+        description: `${current.mobile}: ${current.status} (RTP date: ${indiaDay(current.rtpDate) || 'not set'}) → ${status} (RTP date: ${indiaDay(scheduledDate) || 'not set'}, IST).`
+      };
+    });
+  };
+
+  const recordLocationCopy = async (records: NumberRecord[], filterDescription: string) => {
+    if (!db || !user || !records.length) return;
+    await addDoc(collection(db, 'activities'), {
+      employeeName: profile?.displayName || user.displayName || user.email || 'User',
+      action: 'Copied SIM Locations', groupName: 'SIM_LOCATIONS',
+      description: `${filterDescription}. Copied ${records.length} number(s):\n${records.map(number => `${number.mobile} — ${number.currentLocation || 'N/A'}`).join('\n')}`,
+      createdBy: user.uid, source: 'UI', srNo: getNextSrNo(activities), timestamp: serverTimestamp(), notificationStatus: 'Pending'
+    });
+  };
+
+  const recordLocationSearch = async (resultCount: number, filterDescription: string) => {
+    if (!db || !user) throw new Error('Sign in to search SIM locations.');
+    await addDoc(collection(db, 'activities'), {
+      employeeName: profile?.displayName || user.displayName || user.email || 'User',
+      action: 'Searched SIM Locations', groupName: 'SIM_LOCATIONS',
+      description: `${filterDescription}. Found ${resultCount} number(s).`,
+      createdBy: user.uid, source: 'UI', srNo: getNextSrNo(activities), timestamp: serverTimestamp(), notificationStatus: 'Pending'
     });
   };
 
@@ -3111,6 +3233,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity,
     assignNumbersToEmployee,
     checkInNumber,
+    bulkUpdateOwnership,
+    bulkUpdateCheckInDate,
+    bulkUpdateNumberStatus,
+    recordLocationCopy,
+    recordLocationSearch,
     sellNumber,
     bulkSellNumbers,
     cancelSale,
