@@ -782,58 +782,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const checkRtpDates = async () => {
       if (!db) return;
 
-      const batch = writeBatch(db);
       const updatedIds: string[] = [];
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      numbers.forEach(num => {
-        if (num.status === 'Non-RTP' && num.rtpDate) {
-          const rtpDateObj = num.rtpDate.toDate();
-          if (isValid(rtpDateObj)) {
-            const rtpDateOnly = new Date(rtpDateObj);
-            rtpDateOnly.setHours(0, 0, 0, 0);
-
-            const shouldConvert = isToday(rtpDateObj) || isPast(rtpDateObj);
-
-            console.log(`[RTP CHECKER] Mobile: ${num.mobile}, Status: ${num.status}, RTPDate: ${rtpDateObj.toISOString()}, Today: ${today.toISOString()}, ShouldConvert: ${shouldConvert}`);
-
-            if (shouldConvert) {
-              const docRef = doc(db, 'numbers', num.id);
-              const historyEvent = createLifecycleEvent('RTP Status Changed', 'Number automatically became RTP as per schedule.', 'System');
-              batch.update(docRef, { status: 'RTP', rtpDate: null, history: arrayUnion(historyEvent) });
-              addActivity({
-                employeeName: 'System',
-                action: 'Auto-updated to RTP',
-                description: `Number ${num.mobile} automatically became RTP because RTPDate (${rtpDateObj.toLocaleDateString()}) has passed.`
-              }, false);
-              updatedIds.push(num.id);
-              console.log(`[RTP CONVERTER] Converting ${num.mobile} to RTP - date passed`);
-            }
+      const eligible = numbers.filter(number => number.status === 'Non-RTP' && isReminderDue(number.rtpDate));
+      // The server also runs this check. Re-read status/date inside each transaction
+      // so whichever app converts first wins without duplicate histories or audits.
+      for (let offset = 0; offset < eligible.length; offset += 40) {
+        const activityRef = doc(collection(db, 'activities'));
+        const ids = await runTransaction(db, async transaction => {
+          const snapshots = await Promise.all(eligible.slice(offset, offset + 40).map(number => transaction.get(doc(db, 'numbers', number.id))));
+          const changes = snapshots.flatMap(snapshot => {
+            if (!snapshot.exists()) return [];
+            const current = { ...snapshot.data(), id: snapshot.id } as NumberRecord;
+            if (current.status !== 'Non-RTP' || !isReminderDue(current.rtpDate)) return [];
+            return [{ snapshot, current, description: `${current.mobile}: Non-RTP → RTP; scheduled date ${indiaDay(current.rtpDate)} arrived (IST); Account: ${current.accountName || 'N/A'}.` }];
+          });
+          if (!changes.length) return [];
+          for (const { snapshot, description } of changes) {
+            transaction.update(snapshot.ref, { status: 'RTP', rtpDate: null, history: arrayUnion(createLifecycleEvent('RTP Status Changed', description, 'System')) });
           }
-        }
-      });
-
+          transaction.set(activityRef, {
+            employeeName: 'System', action: 'Auto-updated to RTP', groupName: 'INVENTORY',
+            description: changes.map(change => change.description).join('\n'), createdBy: user.uid,
+            source: 'UI', srNo: getNextSrNo(activities) + offset / 40,
+            timestamp: serverTimestamp(), notificationStatus: 'Pending'
+          });
+          return changes.map(change => change.current.id);
+        });
+        updatedIds.push(...ids);
+      }
       if (updatedIds.length > 0) {
-        console.log(`[RTP CONVERTER] Converting ${updatedIds.length} records to RTP`);
         setRecentlyAutoRtpIds(updatedIds);
         setTimeout(() => setRecentlyAutoRtpIds([]), 5 * 60 * 1000); // Clear after 5 minutes
-
-        await batch.commit().catch(async (serverError) => {
-          const permissionError = new FirestorePermissionError({
-            path: 'numbers',
-            operation: 'update',
-            requestResourceData: { info: 'Batch update for RTP status' },
-          });
-          errorEmitter.emit('permission-error', permissionError);
-        });
       }
     };
 
-    checkRtpDates();
-    const interval = setInterval(checkRtpDates, 60000);
+    const check = () => { void checkRtpDates().catch(error => console.error('Automatic RTP update failed:', error)); };
+    check();
+    const interval = setInterval(check, 60000);
     return () => clearInterval(interval);
-  }, [db, numbers, numbersLoading, authLoading, user, addActivity, createLifecycleEvent]);
+  }, [db, numbers, numbersLoading, authLoading, user, role, activities, createLifecycleEvent]);
 
   useEffect(() => {
     const createSystemReminders = async () => {

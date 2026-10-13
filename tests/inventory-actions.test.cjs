@@ -5,13 +5,13 @@ const path = require('node:path');
 const Module = require('node:module');
 const ts = require('typescript');
 const { Timestamp } = require('firebase/firestore');
-let records, role, database, commits, toasts;
+let records, role, database, commits, toasts, effects;
 let stateIndex = 0;
 let docIndex = 0;
 const react = {
   createContext: () => ({ Provider: 'provider' }),
   createElement: (type, props) => ({ type, props }),
-  useCallback: fn => fn, useMemo: fn => fn(), useEffect() {},
+  useCallback: fn => fn, useMemo: fn => fn(), useEffect(fn) { effects.push(fn); },
   useState: value => [stateIndex++ === 0 ? records : value === true ? false : value, () => {}]
 };
 const firestore = {
@@ -52,7 +52,7 @@ loaded.require = name => {
 };
 loaded._compile(compiled.outputText, sourcePath);
 function reset(recordCount = 2, userRole = 'employee') {
-  role = userRole; stateIndex = 0; docIndex = 0; commits = []; toasts = [];
+  role = userRole; stateIndex = 0; docIndex = 0; commits = []; toasts = []; effects = [];
   records = Array.from({ length: recordCount }, (_, index) => ({
     id: `number-${index}`, mobile: `${9000000000 + index}`, assignedTo: 'Employee',
     ownershipType: 'Partnership', partnerName: 'Old Partner', currentLocation: 'Store', checkInDate: null,
@@ -173,4 +173,33 @@ test('unchanged RTP schedules skip writes and unsupported roles or reassigned re
   app = reset(2, 'viewer');
   await assert.rejects(app.bulkUpdateNumberStatus(['number-0'], 'RTP', null), /admin or employee/);
   assert.equal(commits.length, 0);
+});
+
+test('dashboard automatic RTP rechecks live dates and queues history/activity with the conversion', async () => {
+  reset(3, 'admin');
+  for (const record of records) {
+    record.rtpDate = Timestamp.fromDate(new Date('2020-01-01'));
+    database.get(record.id).rtpDate = record.rtpDate;
+  }
+  database.get('number-1').rtpDate = Timestamp.fromDate(new Date('2099-01-01'));
+  database.get('number-2').status = 'RTP';
+  const effect = effects.find(fn => fn.toString().includes('checkRtpDates'));
+  assert.ok(effect);
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (...args) => originalSetTimeout(...args).unref();
+  try {
+    const cleanup = effect(); cleanup();
+    for (let attempt = 0; attempt < 20 && !commits.length; attempt++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(database.get('number-0').status, 'RTP');
+    assert.equal(database.get('number-0').rtpDate, null);
+    assert.equal(database.get('number-0').history.union.performedBy, 'System');
+    assert.equal(database.get('number-1').status, 'Non-RTP');
+    assert.equal(database.get('number-2').history, undefined);
+    const activity = commits[0].find(write => !write.update).data;
+    assert.equal(activity.notificationStatus, 'Pending'); assert.equal(activity.groupName, 'INVENTORY');
+    assert.equal(activity.createdBy, 'employee'); assert.equal(activity.employeeName, 'System');
+    const cleanupAgain = effect(); cleanupAgain();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(commits.flat().filter(write => !write.update).length, 1);
+  } finally { global.setTimeout = originalSetTimeout; }
 });
