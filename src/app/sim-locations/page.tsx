@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
-import { LogIn, MoreHorizontal, Edit, Copy, Search } from 'lucide-react';
+import { LogIn, MoreHorizontal, Edit, Copy, Search, MapPin } from 'lucide-react';
 import { formatReminderDate } from '@/lib/system-reminders';
 import { TableSpinner } from '@/components/ui/spinner';
 import { useAuth } from '@/context/auth-context';
@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { EditLocationModal } from '@/components/edit-location-modal';
 import { Input } from '@/components/ui/input';
 import { BulkCheckInModal } from '@/components/bulk-check-in-modal';
+import { BulkLocationUpdateModal } from '@/components/bulk-location-update-modal';
 import { locationClipboardText } from '@/lib/number-actions';
 import { useToast } from '@/hooks/use-toast';
 
@@ -37,6 +38,7 @@ export default function SimLocationsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
+  const [isBulkLocationModalOpen, setIsBulkLocationModalOpen] = useState(false);
   const [checkInMobiles, setCheckInMobiles] = useState<string[]>([]);
   const [copying, setCopying] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -151,7 +153,10 @@ export default function SimLocationsPage() {
         title="SIM Location Tracking"
         description="Track the current location and assignment of all SIMs."
       >
-        <Button onClick={() => openCheckIn()} disabled={loading}><LogIn className="mr-2 h-4 w-4" />Bulk Check-In Date</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => openCheckIn()} disabled={loading}><LogIn className="mr-2 h-4 w-4" />Bulk Check-In Date</Button>
+          <Button onClick={() => setIsBulkLocationModalOpen(true)} disabled={loading}><MapPin className="mr-2 h-4 w-4" />Bulk Location Update</Button>
+        </div>
       </PageHeader>
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
         <div className="flex flex-col sm:flex-row items-center gap-4 flex-wrap w-full">
@@ -299,6 +304,7 @@ export default function SimLocationsPage() {
         selectedNumbers={selectedNumberRecords}
       />
       <BulkCheckInModal isOpen={isCheckInModalOpen} onClose={() => { setIsCheckInModalOpen(false); setSelectedRows([]); }} initialMobiles={checkInMobiles} />
+      <BulkLocationUpdateModal isOpen={isBulkLocationModalOpen} onClose={() => { setIsBulkLocationModalOpen(false); setSelectedRows([]); }} />
     </>
   );
 }

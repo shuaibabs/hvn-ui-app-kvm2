@@ -147,6 +147,7 @@ type AppContextType = {
   checkInNumber: (id: string) => void;
   bulkUpdateOwnership: (ids: string[], ownershipType: 'Individual' | 'Partnership', partnerName: string) => Promise<void>;
   bulkUpdateCheckInDate: (ids: string[], date: Date) => Promise<void>;
+  bulkUpdateNumberLocation: (ids: string[], location: Pick<NumberRecord, 'locationType' | 'currentLocation'>) => Promise<void>;
   bulkUpdateNumberStatus: (ids: string[], status: 'RTP' | 'Non-RTP', rtpDate: Date | null) => Promise<void>;
   recordLocationCopy: (records: NumberRecord[], filterDescription: string) => Promise<void>;
   recordLocationSearch: (resultCount: number, filterDescription: string) => Promise<void>;
@@ -1334,6 +1335,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(`Check-in date for ${current.mobile} changed. Review the preview and try again.`);
       }
       return { fields: { checkInDate: dueDate }, description: `${current.mobile}: Check-in date ${indiaDay(current.checkInDate) || 'not set'} → ${indiaDay(date)} (IST); location: ${current.currentLocation || 'N/A'}.` };
+    });
+  };
+
+  const bulkUpdateNumberLocation = async (ids: string[], location: Pick<NumberRecord, 'locationType' | 'currentLocation'>) => {
+    if (!['Store', 'Employee', 'Dealer'].includes(location.locationType)) throw new Error('Choose a valid location type.');
+    const currentLocation = location.currentLocation.trim();
+    if (!currentLocation) throw new Error('Enter a current location.');
+    const locationType = location.locationType;
+    await recordBulkInventoryChange(ids, 'Bulk Updated Number Location', 'SIM_LOCATIONS', (current, preview) => {
+      if (current.currentLocation !== preview.currentLocation || current.locationType !== preview.locationType) {
+        throw new Error(`Location for ${current.mobile} changed. Review the preview and try again.`);
+      }
+      if (current.currentLocation === currentLocation && current.locationType === locationType) return null;
+      return {
+        fields: { currentLocation, locationType },
+        description: `${current.mobile}: Location ${current.currentLocation || 'Not set'} (${current.locationType || 'Not set'}) → ${currentLocation} (${locationType}).`
+      };
     });
   };
 
@@ -3222,6 +3240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     checkInNumber,
     bulkUpdateOwnership,
     bulkUpdateCheckInDate,
+    bulkUpdateNumberLocation,
     bulkUpdateNumberStatus,
     recordLocationCopy,
     recordLocationSearch,
